@@ -24,7 +24,7 @@ kafka-topics --list --bootstrap-server localhost:9092
 docker exec -it python-worker bash
 python kafka_producer.py
 
-#chay cónumer
+#chay consumer
 docker exec -it python-worker bash
 python kafka_consumer.py
 
@@ -36,3 +36,5 @@ hdfs dfs -ls /user/kafka_data/real_estate_by_date/2025/12/10
 hdfs dfs -cat /user/kafka_data/real_estate_by_date/2025/12/10/data_*.jsonl | head
 
 
+#xoa thu muc va toan bo file
+hdfs dfs -rm -r /user/kafka_data/real_estate_by_date/2025/12/10

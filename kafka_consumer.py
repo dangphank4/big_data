@@ -8,18 +8,14 @@ from confluent_kafka import Consumer, KafkaException
 from hdfs import InsecureClient
 from hdfs.util import HdfsError
 
-# ================================
 # LOGGING
-# ================================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - PID:%(process)d - %(message)s'
 )
 log = logging.getLogger(__name__)
 
-# ================================
 # CONFIG
-# ================================
 KAFKA_BROKER_URL = "kafka:9092"
 KAFKA_TOPIC = 'stocks-history'
 KAFKA_GROUP_ID = 'hdfs-writer-group-final-v1'
@@ -36,9 +32,7 @@ consumer = None
 hdfs_ready = False
 
 
-# =========================================================
 # GHI FILE MỚI VÀO HDFS THEO NGÀY
-# =========================================================
 def write_data_to_new_hdfs_file(current_hdfs_client, base_path, batch_data):
     global hdfs_ready, hdfs_client
 
@@ -71,9 +65,7 @@ def write_data_to_new_hdfs_file(current_hdfs_client, base_path, batch_data):
         return False
 
 
-# =========================================================
 # VÒNG LẶP CONSUME
-# =========================================================
 def consume_and_write():
     global consumer, hdfs_client, hdfs_ready
 
