@@ -1,0 +1,137 @@
+version: '3.9'
+
+services:
+  # ======================
+  # ZOOKEEPER
+  # ======================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.1   
+    container_name: zookeeper
+    networks:
+      - bigdata-network
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  # ======================
+  # KAFKA
+  # ======================
+  kafka:
+    image: confluentinc/cp-kafka:7.9.1    
+    container_name: kafka
+    networks:
+      - bigdata-network
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+
+  # ======================
+  # HDFS (Hadoop)
+  # ======================
+  hadoop-namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-namenode
+    environment:
+      CLUSTER_NAME: test
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:9000
+    ports:
+      - "9870:9870"  # UI NameNode
+      - "9000:9000"
+    volumes:
+      - hdfs-namenode:/hadoop/dfs/name
+    networks:
+      - bigdata-network
+  hadoop-datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-datanode
+    depends_on:
+      - hadoop-namenode
+    environment:
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:9000
+      NAMENODE_HOST: hadoop-namenode
+      SERVICE_PRECONDITION: "hadoop-namenode:9000"
+    ports:
+      - "9864:9864"  # UI DataNode
+    volumes:
+      - hdfs-datanode:/hadoop/dfs/data
+    networks:
+      - bigdata-network
+
+  # ======================
+  # SPARK
+  # ======================
+  spark:
+    image: apache/spark:3.5.1
+    container_name: spark
+    networks:
+      - bigdata-network
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+
+  # ======================
+  # ELASTICSEARCH
+  # ======================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    networks:
+      - bigdata-network
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"  # REST API
+      - "9300:9300"  # Cluster internal communication
+
+  # ======================
+  # KIBANA
+  # ======================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    networks:
+      - bigdata-network
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"  # UI Kibana
+
+  python-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: python-worker
+    networks:
+      - bigdata-network
+    volumes:
+      - ./:/app
+    depends_on:
+      - kafka
+      - hadoop-namenode
+    tty: true
+
+
+# ======================
+# VOLUMES
+# ======================
+volumes:
+  hdfs-namenode:
+  hdfs-datanode:
+
+networks:
+  bigdata-network:
+    driver: bridge
