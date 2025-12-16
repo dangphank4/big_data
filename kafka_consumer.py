@@ -85,12 +85,13 @@ def consume_and_write():
             continue
 
         try:
-            record = json.loads(msg.value().decode("utf-8"))
+            event = json.loads(msg.value().decode("utf-8"))
+
         except Exception:
             log.error("JSON decode error")
             continue
 
-        batch.append(record)
+        batch.append(event['payload'])
 
         now = time.time()
 

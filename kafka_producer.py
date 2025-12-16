@@ -1,6 +1,7 @@
 from confluent_kafka import Producer
 import json
 import time
+from datetime import datetime
 
 TOPIC = "stocks-history"
 
@@ -24,14 +25,21 @@ print(f"Loaded {len(data)} history records")
 
 # Gửi từng bản ghi
 for record in data:
+
+    event = {
+        "mode": "batch",  # batch | stream
+        "event_time": record.get("time"),  # event-time thật
+        "ingest_time": datetime.utcnow().isoformat(),
+        "payload": record
+    }
     producer.produce(
         TOPIC,
-        value=json.dumps(record).encode("utf-8"),
+        value=json.dumps(event).encode("utf-8"),
         callback=delivery_report
     )
     producer.poll(0)  # cần cho confluent-kafka
     print("Sent:", record["ticker"], record["time"])
-    time.sleep(0.2)
+    time.sleep(1)
 
 producer.flush()
 print("Done sending history.")
