@@ -1,13 +1,20 @@
-# Dockerfile
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy mã Python
-COPY kafka_producer.py kafka_consumer.py history_all.json /app/
+# Copy code
+COPY kafka_producer.py kafka_consumer.py /app/
+COPY batch_jobs/ /app/batch/
+COPY history_all.json /app/data/
 
-# Cài packages cần thiết
-RUN pip install --no-cache-dir confluent-kafka hdfs
+# Cài dependencies
+RUN pip install --no-cache-dir \
+    pandas \
+    numpy \
+    confluent-kafka \
+    hdfs
 
-# Mặc định chỉ chạy bash, sẽ override khi chạy container
-CMD ["bash"]
+# Tạo thư mục output
+RUN mkdir -p /app/output
+
+CMD ["python", "batch/run_all.py"]
