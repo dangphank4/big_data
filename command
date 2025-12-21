@@ -3,10 +3,10 @@ docker-compose down
 docker network prune -f
 docker volume prune -f
 
-#tao network thủ công
+#tao network thủ công (1)
 docker network create bigdata-network
 
-#chay stack voi docker compose
+#chay stack voi docker compose(2)
 docker-compose build python-worker
 docker-compose up -d
 
@@ -14,16 +14,16 @@ docker-compose up -d
 docker network inspect bigdata-network
 
 
-#tao topic
+#tao topic(3)
 docker exec -it kafka bash
 kafka-topics --create --topic stocks-history --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 kafka-topics --list --bootstrap-server localhost:9092
 
-#chay producer
+#chay producer(4)
 docker exec -it python-worker bash
 python kafka_producer.py
 
-#chay consumer
+#chay consumer(4)
 docker exec -it python-worker bash
 python kafka_consumer.py
 

@@ -10,9 +10,42 @@ Features:
 - Support multiple tickers
 """
 
+"""
+KAFKA PRODUCER: STOCK MARKET DATA STREAMING
+============================================
+Gửi dữ liệu cổ phiếu real-time vào Kafka topic
+
+Features:
+- Load historical data để simulate realtime
+- Continuous streaming với timestamp update
+- Random price fluctuations để simulate market
+- Support multiple tickers
+"""
+
 from confluent_kafka import Producer
 import json
 import time
+import random
+from datetime import datetime, timedelta
+import os
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Kafka Configuration
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "stock-realtime-topic")  
+
+# Streaming Configuration
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "30"))  # seconds
+
+# Tickers to monitor
+TICKERS = os.getenv("TICKERS", "AAPL,NVDA").split(",")
+
+# ============================================================================
+# KAFKA PRODUCER SETUP
+# ============================================================================
 import random
 from datetime import datetime, timedelta
 import os
@@ -40,15 +73,22 @@ conf = {
     "client.id": "stock-producer",
     "compression.type": "lz4",  # Compression để giảm bandwidth
     "linger.ms": 10,  # Batch messages
+    "bootstrap.servers": KAFKA_BROKER,
+    "client.id": "stock-producer",
+    "compression.type": "lz4",  # Compression để giảm bandwidth
+    "linger.ms": 10,  # Batch messages
 }
 
 producer = Producer(conf)
 
 def delivery_report(err, msg):
     """Callback khi message được gửi thành công hoặc fail"""
+    """Callback khi message được gửi thành công hoặc fail"""
     if err:
         print(f" Delivery failed: {err}")
+        print(f" Delivery failed: {err}")
     else:
+        print(f" Sent to {msg.topic()} [{msg.partition()}] @ {msg.offset()}")
         print(f" Sent to {msg.topic()} [{msg.partition()}] @ {msg.offset()}")
 
 # ============================================================================
