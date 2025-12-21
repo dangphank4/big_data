@@ -85,13 +85,12 @@ def consume_and_write():
             continue
 
         try:
-            event = json.loads(msg.value().decode("utf-8"))
-
+            record = json.loads(msg.value().decode("utf-8"))
         except Exception:
             log.error("JSON decode error")
             continue
 
-        batch.append(event['payload'])
+        batch.append(record)
 
         now = time.time()
 
@@ -147,4 +146,4 @@ if __name__ == "__main__":
 
         consumer.close()
         log.warning("Restarting session...")
-        time.sleep(retry_delay)
+        time.sleep(retry_delay) 
