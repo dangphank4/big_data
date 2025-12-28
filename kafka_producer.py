@@ -98,7 +98,7 @@ def delivery_report(err, msg):
 def load_latest_prices():
     """Load giá gần nhất từ history để làm base"""
     try:
-        with open("history_all.json", "r", encoding="utf-8") as f:
+        with open("history.json", "r", encoding="utf-8") as f:
             data = json.load(f)
         
         # Lấy giá gần nhất của mỗi ticker
@@ -117,7 +117,7 @@ def load_latest_prices():
         return latest_prices
     
     except FileNotFoundError:
-        print(" history_all.json not found, using default prices")
+        print(" history.json not found, using default prices")
         # Default prices nếu không có file
         return {
             "AAPL": {"Close": 180.0, "Volume": 50000000},
