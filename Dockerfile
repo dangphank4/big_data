@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir \
     pandas \
     numpy \
     confluent-kafka \
-    hdfs
+    hdfs \
+    elasticsearch
 
 # Tạo thư mục output
 RUN mkdir -p /app/output

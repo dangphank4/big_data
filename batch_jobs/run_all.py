@@ -10,6 +10,7 @@ from batch_jobs.monthly import (
     batch_monthly_volatility
 )
 
+from elasticsearch import Elasticsearch, helpers
 from hdfs import InsecureClient
 import os
 
@@ -22,6 +23,24 @@ def write_to_hdfs(client, hdfs_path, df):
                 date_format="iso"
             ).encode("utf-8")
         )
+
+def write_to_elasticsearch(df, index_name):
+    es = Elasticsearch("http://elasticsearch:9200")
+
+    actions = []
+    for _, row in df.iterrows():
+        doc = row.to_dict()
+
+        if "date" in doc:
+            doc["@timestamp"] = doc["date"]
+
+        actions.append({
+            "_index": index_name,
+            "_source": doc
+        })
+
+    helpers.bulk(es, actions)
+    print(f"Indexed {len(actions)} documents into {index_name}")
 
 
 def main():
@@ -87,6 +106,9 @@ def main():
     )
 
     print("BATCH LAYER RECOMPUTE DONE")
+
+    write_to_elasticsearch(df, "batch-features")
+    write_to_elasticsearch(monthly_ret, "monthly-return")
 
 
 if __name__ == "__main__":
