@@ -4,7 +4,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Copy mã Python
-COPY kafka_producer.py kafka_consumer.py history_all.json /app/
+COPY kafka_producer.py kafka_consumer.py history.json /app/
 
 # Cài packages cần thiết
 RUN pip install --no-cache-dir confluent-kafka hdfs

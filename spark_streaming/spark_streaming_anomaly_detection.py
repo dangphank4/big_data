@@ -386,7 +386,7 @@ if __name__ == "__main__":
         .format("kafka") \
         .option("kafka.bootstrap.servers", KAFKA_BROKER) \
         .option("subscribe", KAFKA_TOPIC) \
-        .option("startingOffsets", "latest") \
+        .option("startingOffsets", "earliest") \
         .option("failOnDataLoss", "false") \
         .load()
     
@@ -394,12 +394,11 @@ if __name__ == "__main__":
     print("\n🔍 Parse dữ liệu JSON...")
     parsed_df = kafka_df \
         .select(
-            col("timestamp").alias("kafka_timestamp"),
             col("value").cast(StringType())
         ) \
         .filter(col("value").isNotNull()) \
         .withColumn("data", from_json(col("value"), stock_schema)) \
-        .select("kafka_timestamp", "data.*") \
+        .select("data.*") \
         .withColumn("timestamp", to_timestamp(col("time"))) \
         .filter(col("Close").isNotNull())
     
@@ -447,16 +446,27 @@ if __name__ == "__main__":
         "anomaly_count", "risk_alert_level", "action_recommendation"
     )
     
-    # Ghi vào Elasticsearch
+    # Ghi vào Elasticsearch using foreachBatch (compatible with ES 7.17 + Spark 3.5)
     print(f"\n💾 Ghi kết quả vào Elasticsearch - Index: {ES_INDEX}")
+    
+    def write_to_es(batch_df, batch_id):
+        if batch_df.count() > 0:
+            print(f"\n📦 Processing batch {batch_id} with {batch_df.count()} records")
+            batch_df.write \
+                .format("org.elasticsearch.spark.sql") \
+                .option("es.resource", ES_INDEX) \
+                .option("es.nodes", ES_NODES) \
+                .option("es.port", ES_PORT) \
+                .option("es.nodes.wan.only", "true") \
+                .option("es.batch.size.entries", "100") \
+                .option("es.write.operation", "index") \
+                .mode("append") \
+                .save()
+            print(f"✅ Batch {batch_id} written to Elasticsearch")
     
     query = output_df.writeStream \
         .outputMode("append") \
-        .format("org.elasticsearch.spark.sql") \
-        .option("es.resource", ES_INDEX) \
-        .option("es.nodes", ES_NODES) \
-        .option("es.port", ES_PORT) \
-        .option("es.nodes.wan.only", "true") \
+        .foreachBatch(write_to_es) \
         .option("checkpointLocation", CHECKPOINT_LOCATION) \
         .start()
     
@@ -470,7 +480,7 @@ if __name__ == "__main__":
         .start()
     
     print("\n" + "=" * 80)
-    print("🚨 ANOMALY DETECTION ĐANG HOẠT ĐỘNG")
+    print("🚨 ANOMALY DETECTION ĐANG HOẠT ĐỘNG (ForeachBatch mode)")
     print("=" * 80)
     print("\n⚠️  CRITICAL và HIGH risk alerts sẽ được hiển thị ở console\n")
     
