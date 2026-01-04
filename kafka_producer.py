@@ -1,230 +1,130 @@
+#!/usr/bin/env python3
 """
-KAFKA PRODUCER: STOCK MARKET DATA STREAMING
-============================================
-Gửi dữ liệu cổ phiếu real-time vào Kafka topic
-
-Features:
-- Load historical data để simulate realtime
-- Continuous streaming với timestamp update
-- Random price fluctuations để simulate market
-- Support multiple tickers
+KAFKA PRODUCER DAEMON - Chạy background được
 """
 
 from confluent_kafka import Producer
 import json
 import time
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
+import sys
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-# Kafka Configuration
+# Configuration
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "stock-realtime-topic")  
-
-# Streaming Configuration
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "30"))  # seconds
-
-# Tickers to monitor
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "stock-realtime-topic")
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "30"))
 TICKERS = os.getenv("TICKERS", "AAPL,NVDA").split(",")
 
-# ============================================================================
-# KAFKA PRODUCER SETUP
-# ============================================================================
+# Unbuffered output for daemon mode
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
+sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
 
+# Kafka Producer
 conf = {
     "bootstrap.servers": KAFKA_BROKER,
-    "client.id": "stock-producer",
-    "compression.type": "lz4",  # Compression để giảm bandwidth
-    "linger.ms": 10,  # Batch messages
+    "client.id": "stock-producer-daemon",
+    "compression.type": "lz4",
+    "linger.ms": 10,
 }
-
 producer = Producer(conf)
 
+# Simple callback - no verbose output
 def delivery_report(err, msg):
-    """Callback khi message được gửi thành công hoặc fail"""
     if err:
-        print(f" Delivery failed: {err}")
-    else:
-        print(f" Sent to {msg.topic()} [{msg.partition()}] @ {msg.offset()}")
-
-# ============================================================================
-# DATA SIMULATION FUNCTIONS
-# ============================================================================
+        print(f"[ERROR] {datetime.now()}: {err}", flush=True)
 
 def load_latest_prices():
-    """Load giá gần nhất từ history để làm base"""
+    """Load initial prices"""
     try:
-        with open("history_all.json", "r", encoding="utf-8") as f:
+        with open("/app/history_all.json", "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # Lấy giá gần nhất của mỗi ticker
         latest_prices = {}
         for record in data:
             ticker = record["ticker"]
             if ticker in TICKERS:
-                if ticker not in latest_prices:
+                if ticker not in latest_prices or record["time"] > latest_prices[ticker]["time"]:
                     latest_prices[ticker] = record
-                else:
-                    # Update nếu có ngày mới hơn
-                    if record["time"] > latest_prices[ticker]["time"]:
-                        latest_prices[ticker] = record
         
-        print(f" Loaded latest prices for {len(latest_prices)} tickers")
+        print(f"[INFO] {datetime.now()}: Loaded {len(latest_prices)} tickers", flush=True)
         return latest_prices
-    
-    except FileNotFoundError:
-        print(" history_all.json not found, using default prices")
-        # Default prices nếu không có file
-        return {
-            "AAPL": {"Close": 180.0, "Volume": 50000000},
-            "NVDA": {"Close": 500.0, "Volume": 40000000},
-        }
+    except Exception as e:
+        print(f"[ERROR] {datetime.now()}: Cannot load history - {e}", flush=True)
+        return {}
 
-def simulate_realtime_price(base_price, volatility=0.02):
-    """
-    Simulate biến động giá real-time
-    
-    Args:
-        base_price: Giá hiện tại
-        volatility: Mức độ biến động (default 2%)
-    
-    Returns:
-        dict with Open, High, Low, Close prices
-    """
-    # Random walk: giá có thể lên hoặc xuống
-    price_change_pct = random.uniform(-volatility, volatility)
-    
-    open_price = base_price
-    close_price = base_price * (1 + price_change_pct)
-    
-    # High/Low based on volatility
-    high_price = max(open_price, close_price) * (1 + random.uniform(0, volatility/2))
-    low_price = min(open_price, close_price) * (1 - random.uniform(0, volatility/2))
-    
-    return {
-        "Open": round(open_price, 2),
-        "High": round(high_price, 2),
-        "Low": round(low_price, 2),
-        "Close": round(close_price, 2)
-    }
+def simulate_price_update(last_close):
+    """Simulate price movement"""
+    change_percent = random.uniform(-2, 2)
+    new_price = last_close * (1 + change_percent / 100)
+    return round(new_price, 2)
 
-def simulate_volume(base_volume, volatility=0.3):
-    """Simulate volume với biến động"""
-    volume_change = random.uniform(-volatility, volatility)
-    new_volume = base_volume * (1 + volume_change)
-    return int(max(1000000, new_volume))  # Min 1M volume
-
-# ============================================================================
-# STREAMING MODES
-# ============================================================================
-
-def stream_realtime_mode():
-    """
-    Real-time Stock Data Streaming
-    ==============================
-    Liên tục generate dữ liệu cổ phiếu mới với timestamp hiện tại
-    để feed vào Spark Streaming jobs (Technical Indicators & Anomaly Detection)
-    """
-    print("\n" + "="*80)
-    print(" STARTING REAL-TIME STREAMING MODE")
-    print("="*80)
-    print(f" Kafka Broker: {KAFKA_BROKER}")
-    print(f" Topic: {KAFKA_TOPIC}")
-    print(f" Update Interval: {UPDATE_INTERVAL}s")
-    print(f" Tickers: {', '.join(TICKERS)}")
-    print("="*80 + "\n")
+def main():
+    print(f"[START] {datetime.now()}: Producer starting...", flush=True)
+    print(f"[CONFIG] Broker={KAFKA_BROKER}, Topic={KAFKA_TOPIC}, Interval={UPDATE_INTERVAL}s", flush=True)
     
-    # Load base prices
+    # Load initial data
     latest_prices = load_latest_prices()
+    if not latest_prices:
+        print("[ERROR] No initial data, using defaults", flush=True)
+        latest_prices = {
+            "AAPL": {"ticker": "AAPL", "company": "Apple Inc.", "Close": 280.0},
+            "NVDA": {"ticker": "NVDA", "company": "NVIDIA Corporation", "Close": 185.0}
+        }
     
-    # Current state for each ticker
-    current_state = {}
-    for ticker in TICKERS:
-        if ticker in latest_prices:
-            current_state[ticker] = {
-                "company": latest_prices[ticker].get("company", f"{ticker} Corp"),
-                "last_close": latest_prices[ticker]["Close"],
-                "base_volume": latest_prices[ticker]["Volume"]
-            }
-        else:
-            # Default nếu không có trong history
-            current_state[ticker] = {
-                "company": f"{ticker} Corp",
-                "last_close": 100.0,
-                "base_volume": 10000000
-            }
+    # Initialize state
+    state = {ticker: {"last_close": latest_prices[ticker]["Close"]} for ticker in TICKERS}
+    batch_count = 0
     
-    print(" Starting prices:")
-    for ticker, state in current_state.items():
-        print(f"  {ticker}: ${state['last_close']:.2f}")
-    print()
+    print(f"[READY] {datetime.now()}: Starting data stream...", flush=True)
     
-    # Streaming loop
-    message_count = 0
     try:
         while True:
-            timestamp = datetime.now().isoformat()
+            batch_count += 1
+            timestamp = datetime.now()
             
             for ticker in TICKERS:
-                state = current_state[ticker]
-                
-                # Simulate new prices based on last close
-                prices = simulate_realtime_price(state["last_close"], volatility=0.02)
-                volume = simulate_volume(state["base_volume"], volatility=0.3)
+                # Simulate prices
+                new_close = simulate_price_update(state[ticker]["last_close"])
+                new_open = state[ticker]["last_close"]
+                new_high = max(new_close, new_open) * random.uniform(1.0, 1.02)
+                new_low = min(new_close, new_open) * random.uniform(0.98, 1.0)
+                volume = random.randint(10_000_000, 200_000_000)
                 
                 # Create message
                 message = {
                     "ticker": ticker,
-                    "company": state["company"],
-                    "time": timestamp,
-                    "Open": prices["Open"],
-                    "High": prices["High"],
-                    "Low": prices["Low"],
-                    "Close": prices["Close"],
+                    "company": latest_prices[ticker].get("company", ticker),
+                    "time": timestamp.isoformat(),
+                    "Open": round(new_open, 2),
+                    "High": round(new_high, 2),
+                    "Low": round(new_low, 2),
+                    "Close": round(new_close, 2),
                     "Volume": volume
                 }
                 
                 # Send to Kafka
                 producer.produce(
                     KAFKA_TOPIC,
-                    key=ticker.encode('utf-8'),  # Partition by ticker
-                    value=json.dumps(message).encode('utf-8'),
+                    value=json.dumps(message),
                     callback=delivery_report
                 )
-                producer.poll(0)
                 
                 # Update state
-                state["last_close"] = prices["Close"]
-                
-                message_count += 1
-                
-                # Display
-                price_change = ((prices["Close"] - prices["Open"]) / prices["Open"]) * 100
-                arrow = "🟢" if price_change >= 0 else "🔴"
-                print(f"{arrow} {ticker:6s} | ${prices['Close']:8.2f} | {price_change:+6.2f}% | Vol: {volume:,}")
+                state[ticker]["last_close"] = new_close
             
-            print(f"\n Batch #{message_count//len(TICKERS)} sent. Waiting {UPDATE_INTERVAL}s...\n")
             producer.flush()
+            print(f"[BATCH] {datetime.now()}: #{batch_count} sent ({len(TICKERS)} messages)", flush=True)
             time.sleep(UPDATE_INTERVAL)
     
     except KeyboardInterrupt:
-        print("\n\n Interrupted by user")
+        print(f"\n[STOP] {datetime.now()}: Interrupted by user", flush=True)
+    except Exception as e:
+        print(f"\n[ERROR] {datetime.now()}: {e}", flush=True)
     finally:
         producer.flush()
-        print(f"\n Sent total {message_count} messages")
-        print(" Producer stopped")
-
-# ============================================================================
-# MAIN
-# ============================================================================
-
-def main():
-    """Start real-time streaming để Spark Streaming xử lý"""
-    stream_realtime_mode()
+        print(f"[EXIT] {datetime.now()}: Producer stopped (sent {batch_count} batches)", flush=True)
 
 if __name__ == "__main__":
     main()
