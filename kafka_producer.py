@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 KAFKA PRODUCER DAEMON - Chạy background được
 """
@@ -55,10 +54,62 @@ def load_latest_prices():
         return {}
 
 def simulate_price_update(last_close):
-    """Simulate price movement"""
-    change_percent = random.uniform(-2, 2)
-    new_price = last_close * (1 + change_percent / 100)
-    return round(new_price, 2)
+    """Simulate next close price.
+
+    Goal: produce more natural/chaotic movements than a fixed +/-2% uniform.
+    - time-varying volatility (regimes)
+    - heavy-tailed shocks
+    - occasional jumps (news-like moves)
+    """
+    raise NotImplementedError("simulate_price_update is replaced by per-ticker stateful simulation")
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def simulate_next_bar(state):
+    """Stateful price simulation.
+
+    state keys:
+      - last_close: float
+      - vol: float (% std dev per step)
+      - drift: float (% mean per step)
+    """
+    last_close = float(state["last_close"])
+
+    # Volatility mean-reversion with random walk (keeps things lively but bounded)
+    vol = float(state.get("vol", 1.2))
+    drift = float(state.get("drift", 0.0))
+
+    target_vol = 1.2
+    vol = vol + 0.15 * (target_vol - vol) + random.gauss(0.0, 0.15)
+    vol = clamp(vol, 0.2, 6.0)
+
+    # Small drift that slowly wanders
+    drift = drift + random.gauss(0.0, 0.01)
+    drift = clamp(drift, -0.08, 0.08)
+
+    # Heavy-tailed shock via mixture distribution
+    base_move = random.gauss(0.0, vol)
+    if random.random() < 0.12:
+        base_move += random.gauss(0.0, vol * 2.5)
+
+    # Occasional jump (news event)
+    jump = 0.0
+    if random.random() < 0.04:
+        jump = random.gauss(0.0, vol * 4.0)
+
+    change_percent = drift + base_move + jump
+    change_percent = clamp(change_percent, -18.0, 18.0)
+
+    new_close = last_close * (1.0 + change_percent / 100.0)
+    new_close = max(new_close, 0.01)
+
+    state["vol"] = vol
+    state["drift"] = drift
+    state["last_close"] = float(round(new_close, 2))
+    return state["last_close"], change_percent, vol
 
 def main():
     print(f"[START] {datetime.now()}: Producer starting...", flush=True)
@@ -73,8 +124,16 @@ def main():
             "NVDA": {"ticker": "NVDA", "company": "NVIDIA Corporation", "Close": 185.0}
         }
     
-    # Initialize state
-    state = {ticker: {"last_close": latest_prices[ticker]["Close"]} for ticker in TICKERS}
+    # Initialize state (per-ticker volatility/drift so each ticker behaves differently)
+    state = {}
+    for ticker in TICKERS:
+        base_close = float(latest_prices[ticker]["Close"])
+        state[ticker] = {
+            "last_close": base_close,
+            # Different initial vol by ticker; later evolves dynamically
+            "vol": clamp(random.uniform(0.8, 1.8) * (1.2 if ticker == "NVDA" else 1.0), 0.2, 6.0),
+            "drift": random.uniform(-0.02, 0.02),
+        }
     batch_count = 0
     
     print(f"[READY] {datetime.now()}: Starting data stream...", flush=True)
@@ -85,12 +144,23 @@ def main():
             timestamp = datetime.now()
             
             for ticker in TICKERS:
-                # Simulate prices
-                new_close = simulate_price_update(state[ticker]["last_close"])
+                # Simulate prices (stateful + chaotic)
                 new_open = state[ticker]["last_close"]
-                new_high = max(new_close, new_open) * random.uniform(1.0, 1.02)
-                new_low = min(new_close, new_open) * random.uniform(0.98, 1.0)
-                volume = random.randint(10_000_000, 200_000_000)
+                new_close, change_percent, vol = simulate_next_bar(state[ticker])
+
+                # Intrabar range tied to volatility (creates more realistic high/low spread)
+                range_pct = abs(random.gauss(0.0, vol * 0.35)) / 100.0
+                base_high = max(new_close, new_open)
+                base_low = min(new_close, new_open)
+                new_high = base_high * (1.0 + range_pct)
+                new_low = base_low * (1.0 - range_pct)
+                new_low = max(new_low, 0.01)
+
+                # Volume loosely correlated with volatility and move size
+                move_mag = abs(change_percent)
+                volume_base = random.randint(8_000_000, 120_000_000)
+                volume_boost = int(volume_base * (0.3 * (vol / 1.2) + 0.15 * (move_mag / 2.0)))
+                volume = int(clamp(volume_base + volume_boost, 1_000_000, 300_000_000))
                 
                 # Create message
                 message = {
@@ -107,6 +177,7 @@ def main():
                 # Send to Kafka
                 producer.produce(
                     KAFKA_TOPIC,
+                    key=ticker,
                     value=json.dumps(message),
                     callback=delivery_report
                 )
