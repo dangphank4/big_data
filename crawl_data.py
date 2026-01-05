@@ -42,6 +42,13 @@ def save_all_flat_history(
     if isinstance(end, str):
         end = datetime.strptime(end, "%Y-%m-%d %H:%M")
 
+# =====================================================
+# Load 1 file duy nhất và update history FLAT JSON
+# =====================================================
+# def save_all_flat_history(tickers, json_file="history_all.json", start="2025-04-01"):
+
+def save_all_flat_history(tickers, json_file="history.json", interval="1d", start="2023-01-01", end=None):
+    # Load file cũ (nếu có)
     # ---- load old data ----
     if os.path.exists(json_file):
         with open(json_file, "r", encoding="utf-8") as f:
@@ -98,12 +105,11 @@ def save_all_flat_history(
     print("\nĐÃ LƯU HISTORY THEO KHOẢNG NGÀY + GIỜ")
     return updated_records
 
-
 if __name__ == "__main__":
     save_all_flat_history(
-        tickers=["AAPL", "NVDA"],
+        tickers=["AAPL", "NVDA"], 
         json_file="history.json",
-        interval="15m",
-        start="2025-12-10 09:30",
-        end="2025-12-20 15:00"
+        interval="1d",         
+        start="2023-01-01",    
+        end="2026-01-05"
     )
