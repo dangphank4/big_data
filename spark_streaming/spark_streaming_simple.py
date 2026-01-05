@@ -6,6 +6,7 @@ Uses standardization_local for schema consistency
 
 import os
 import sys
+import time
 
 # Add parent directory to path to import standardization_local
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -41,7 +42,7 @@ def create_spark_session():
     return SparkSession.builder \
         .appName("StockRealtimeStreaming") \
         .config("spark.jars.packages", 
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,"
+                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,"
                 "org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16") \
         .config("spark.sql.shuffle.partitions", "4") \
         .config("spark.sql.streaming.minBatchesToRetain", "2") \
@@ -121,18 +122,39 @@ def run_streaming():
         current_timestamp().alias("processed_time")
     )
     
-    # Write to Elasticsearch
-    query = output_df.writeStream \
-        .outputMode("append") \
-        .format("org.elasticsearch.spark.sql") \
-        .option("es.nodes", ES_NODES) \
-        .option("es.port", ES_PORT) \
-        .option("es.resource", ES_INDEX) \
-        .option("es.nodes.wan.only", "true") \
-        .option("es.mapping.date.rich", "false") \
-        .option("checkpointLocation", CHECKPOINT_LOCATION) \
-        .trigger(processingTime=TRIGGER_INTERVAL) \
-        .start()
+    # Start streaming with retry to avoid cold-start races (topic not created yet)
+    startup_retry_seconds = int(os.getenv("STARTUP_RETRY_SECONDS", "5"))
+    startup_max_retries = int(os.getenv("STARTUP_MAX_RETRIES", "60"))
+
+    last_error = None
+    for attempt in range(1, startup_max_retries + 1):
+        try:
+            query = output_df.writeStream \
+                .outputMode("append") \
+                .format("org.elasticsearch.spark.sql") \
+                .option("es.nodes", ES_NODES) \
+                .option("es.port", ES_PORT) \
+                .option("es.resource", ES_INDEX) \
+                .option("es.nodes.wan.only", "true") \
+                .option("checkpointLocation", CHECKPOINT_LOCATION) \
+                .trigger(processingTime=TRIGGER_INTERVAL) \
+                .start()
+            break
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            if "UnknownTopicOrPartitionException" in msg or "UnknownTopicOrPartition" in msg:
+                print(
+                    f"[WARN] Kafka topic not ready yet (attempt {attempt}/{startup_max_retries}). "
+                    f"Retrying in {startup_retry_seconds}s..."
+                )
+                time.sleep(startup_retry_seconds)
+                continue
+            raise
+    else:
+        raise RuntimeError(
+            f"Failed to start streaming after {startup_max_retries} attempts; last error: {last_error}"
+        )
     
     print(f"[INFO] Streaming query started. Writing to {ES_INDEX}")
     print(f"[INFO] Query ID: {query.id}")

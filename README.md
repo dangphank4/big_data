@@ -32,7 +32,7 @@ curl -s "http://localhost:9200/_cat/indices?v" | grep stock
 http://localhost:5601
 ```
 
-Tạo Index Pattern: `stock_realtime` với time field `window_start`
+Tạo Index Pattern: `stock_realtime` với time field `@timestamp` (khuyến nghị). Nếu bạn muốn dùng cửa sổ thời gian, có thể chọn `window_start`.
 
 ## 📖 Tài Liệu Chi Tiết
 

@@ -207,7 +207,30 @@ docker exec -d python-worker bash -c "RUN_MODE=batch BATCH_INTERVAL_HOURS=12 pyt
 Kiểm tra:
 
 ```bash
-docker exec python-worker ps aux | grep unified_runner
+docker exec python-worker python - <<'PY'
+import os
+
+def read_cmdline(pid: str) -> str:
+  try:
+    with open(f"/proc/{pid}/cmdline", "rb") as f:
+      raw = f.read()
+    return raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+  except Exception:
+    return ""
+
+matches = []
+for pid in os.listdir("/proc"):
+  if pid.isdigit():
+    cmd = read_cmdline(pid)
+    if "unified_runner.py" in cmd:
+      matches.append((pid, cmd))
+
+if not matches:
+  print("NOT_RUNNING")
+else:
+  for pid, cmd in sorted(matches, key=lambda x: int(x[0])):
+    print(f"PID={pid} CMD={cmd}")
+PY
 ```
 
 ---
