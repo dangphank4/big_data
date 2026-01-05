@@ -9,10 +9,13 @@ def batch_cumulative_return(df):
     df["daily_return"] = df.groupby("ticker")["Close"].pct_change()
 
     # từ ngày đầu -> hiện tại
-    df["cum_return"] = (
-        1 + df.groupby("ticker")["daily_return"]
-    ).cumprod() - 1
+    # df["cum_return"] = (
+    #     1 + df.groupby("ticker")["daily_return"]
+    # ).cumprod() - 1
 
+# Fix
+    df["cum_return"] = df.groupby("ticker")["daily_return"].transform(lambda x: (1 + x).cumprod() - 1)
+# Fix
     # 30 ngày
     df["return_30d"] = df.groupby("ticker")["Close"].transform(
         lambda x: x.pct_change(30)
@@ -24,4 +27,3 @@ def batch_cumulative_return(df):
     )
 
     return df
-

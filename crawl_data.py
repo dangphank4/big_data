@@ -38,8 +38,9 @@ def df_to_flat_json(df: pd.DataFrame, ticker: str, company: str):
 # =====================================================
 # Load 1 file duy nhất và update history FLAT JSON
 # =====================================================
-def save_all_flat_history(tickers, json_file="history_all.json", start="2025-04-01"):
+# def save_all_flat_history(tickers, json_file="history_all.json", start="2025-04-01"):
 
+def save_all_flat_history(tickers, json_file="history_all.json", start="2023-01-01"):
     # Load file cũ (nếu có)
     if os.path.exists(json_file):
         with open(json_file, "r", encoding="utf-8") as f:

@@ -1,4 +1,5 @@
 # Lợi nhuận theo tháng
+import pandas as pd
 def batch_monthly_return(df):
     df = df.copy()
     df["month"] = df["time"].dt.to_period("M")
@@ -18,6 +19,9 @@ def batch_monthly_return(df):
 #Khối lượng giao dịch theo tháng
 def batch_monthly_volatility(df):
     df = df.copy()
+    # df["month"] = df["time"].dt.to_period("M")
+    # Xóa
+    df["time"] = pd.to_datetime(df["time"]) 
     df["month"] = df["time"].dt.to_period("M")
 
     df["daily_return"] = df.groupby("ticker")["Close"].pct_change()
