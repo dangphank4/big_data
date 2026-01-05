@@ -82,7 +82,7 @@ services:
     environment:
       - SPARK_MODE=master
     ports:
-      - "8080:8080"
+      - "18080:8080"
 
   # ======================
   # ELASTICSEARCH

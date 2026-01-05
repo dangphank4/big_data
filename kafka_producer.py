@@ -70,58 +70,111 @@ def load_latest_prices():
         print("[WARN] history.json not found – using defaults", flush=True)
         return {}
 
-# ============================================================================
-# SIMULATION
-# ============================================================================
-def simulate_realtime_price(base_price, volatility=0.02):
-    pct = random.uniform(-volatility, volatility)
+def simulate_price_update(last_close):
+    """Simulate next close price.
 
-    open_p = base_price
-    close_p = base_price * (1 + pct)
-    high_p = max(open_p, close_p) * random.uniform(1.0, 1.01)
-    low_p = min(open_p, close_p) * random.uniform(0.99, 1.0)
+    Goal: produce more natural/chaotic movements than a fixed +/-2% uniform.
+    - time-varying volatility (regimes)
+    - heavy-tailed shocks
+    - occasional jumps (news-like moves)
+    """
+    raise NotImplementedError("simulate_price_update is replaced by per-ticker stateful simulation")
 
-    return {
-        "Open": round(open_p, 2),
-        "High": round(high_p, 2),
-        "Low": round(low_p, 2),
-        "Close": round(close_p, 2),
-    }
 
-# ============================================================================
-# STREAMING
-# ============================================================================
-def stream_realtime_mode():
-    print("=" * 80)
-    print(" STARTING REAL-TIME STOCK KAFKA PRODUCER")
-    print("=" * 80)
-    print(f"Broker  : {KAFKA_BROKER}")
-    print(f"Topic   : {KAFKA_TOPIC}")
-    print(f"Interval: {UPDATE_INTERVAL}s")
-    print(f"Tickers : {TICKERS}")
-    print("=" * 80, flush=True)
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def simulate_next_bar(state):
+    """Stateful price simulation.
+
+    state keys:
+      - last_close: float
+      - vol: float (% std dev per step)
+      - drift: float (% mean per step)
+    """
+    last_close = float(state["last_close"])
+
+    # Volatility mean-reversion with random walk (keeps things lively but bounded)
+    vol = float(state.get("vol", 1.2))
+    drift = float(state.get("drift", 0.0))
+
+    target_vol = 1.2
+    vol = vol + 0.15 * (target_vol - vol) + random.gauss(0.0, 0.15)
+    vol = clamp(vol, 0.2, 6.0)
+
+    # Small drift that slowly wanders
+    drift = drift + random.gauss(0.0, 0.01)
+    drift = clamp(drift, -0.08, 0.08)
+
+    # Heavy-tailed shock via mixture distribution
+    base_move = random.gauss(0.0, vol)
+    if random.random() < 0.12:
+        base_move += random.gauss(0.0, vol * 2.5)
+
+    # Occasional jump (news event)
+    jump = 0.0
+    if random.random() < 0.04:
+        jump = random.gauss(0.0, vol * 4.0)
+
+    change_percent = drift + base_move + jump
+    change_percent = clamp(change_percent, -18.0, 18.0)
+
+    new_close = last_close * (1.0 + change_percent / 100.0)
+    new_close = max(new_close, 0.01)
+
+    state["vol"] = vol
+    state["drift"] = drift
+    state["last_close"] = float(round(new_close, 2))
+    return state["last_close"], change_percent, vol
 
     latest_prices = load_latest_prices()
-
-    # Fallback defaults
-    for t in TICKERS:
-        latest_prices.setdefault(t, {
-            "ticker": t,
-            "company": t,
-            "Close": random.uniform(100, 500)
-        })
-
-    state = {t: latest_prices[t]["Close"] for t in TICKERS}
-    batch = 0
-
+    if not latest_prices:
+        print("[ERROR] No initial data, using defaults", flush=True)
+        latest_prices = {
+            "AAPL": {"ticker": "AAPL", "company": "Apple Inc.", "Close": 280.0},
+            "NVDA": {"ticker": "NVDA", "company": "NVIDIA Corporation", "Close": 185.0}
+        }
+    
+    # Initialize state (per-ticker volatility/drift so each ticker behaves differently)
+    state = {}
+    for ticker in TICKERS:
+        base_close = float(latest_prices[ticker]["Close"])
+        state[ticker] = {
+            "last_close": base_close,
+            # Different initial vol by ticker; later evolves dynamically
+            "vol": clamp(random.uniform(0.8, 1.8) * (1.2 if ticker == "NVDA" else 1.0), 0.2, 6.0),
+            "drift": random.uniform(-0.02, 0.02),
+        }
+    batch_count = 0
+    
+    print(f"[READY] {datetime.now()}: Starting data stream...", flush=True)
+    
     try:
         while True:
             batch += 1
             timestamp = datetime.now().astimezone().isoformat()
 
             for ticker in TICKERS:
-                price = simulate_realtime_price(state[ticker])
+                # Simulate prices (stateful + chaotic)
+                new_open = state[ticker]["last_close"]
+                new_close, change_percent, vol = simulate_next_bar(state[ticker])
 
+                # Intrabar range tied to volatility (creates more realistic high/low spread)
+                range_pct = abs(random.gauss(0.0, vol * 0.35)) / 100.0
+                base_high = max(new_close, new_open)
+                base_low = min(new_close, new_open)
+                new_high = base_high * (1.0 + range_pct)
+                new_low = base_low * (1.0 - range_pct)
+                new_low = max(new_low, 0.01)
+
+                # Volume loosely correlated with volatility and move size
+                move_mag = abs(change_percent)
+                volume_base = random.randint(8_000_000, 120_000_000)
+                volume_boost = int(volume_base * (0.3 * (vol / 1.2) + 0.15 * (move_mag / 2.0)))
+                volume = int(clamp(volume_base + volume_boost, 1_000_000, 300_000_000))
+                
+                # Create message
                 message = {
                     "ticker": ticker,
                     "company": latest_prices[ticker].get("company", ticker),
@@ -136,6 +189,7 @@ def stream_realtime_mode():
 
                 producer.produce(
                     KAFKA_TOPIC,
+                    key=ticker,
                     value=json.dumps(message),
                     callback=delivery_report
                 )

@@ -8,13 +8,23 @@ Phù hợp với Structured Streaming limitations
 import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, from_json, window, avg, stddev, sum, count,
-    min, max, lit, expr, unix_timestamp,
-    to_timestamp, current_timestamp, round as spark_round
+    avg,
+    col,
+    concat_ws,
+    count,
+    current_timestamp,
+    date_format,
+    from_json,
+    max,
+    min,
+    round as spark_round,
+    stddev,
+    sum,
+    to_timestamp,
+    window,
 )
 from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType, 
-    TimestampType
 )
 
 # ============================================================================
@@ -27,6 +37,15 @@ ES_NODES = os.getenv("ES_NODES", "elasticsearch")
 ES_PORT = os.getenv("ES_PORT", "9200")
 ES_INDEX = os.getenv("ES_INDEX", "stock_realtime")
 CHECKPOINT_LOCATION = os.getenv("CHECKPOINT_LOCATION", "hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_realtime")
+
+# Streaming behavior
+WATERMARK_DELAY = os.getenv("WATERMARK_DELAY", "1 minute")
+WINDOW_DURATION = os.getenv("WINDOW_DURATION", "1 minute")
+ENABLE_CONSOLE_SINK = os.getenv("ENABLE_CONSOLE_SINK", "false").lower() in ("1", "true", "yes")
+CONSOLE_CHECKPOINT_LOCATION = os.getenv(
+    "CONSOLE_CHECKPOINT_LOCATION",
+    CHECKPOINT_LOCATION.rstrip("/") + "_console",
+)
 
 # ============================================================================
 # SCHEMA
@@ -57,6 +76,7 @@ if __name__ == "__main__":
         .appName("SimpleStockStreaming") \
         .config("spark.sql.streaming.schemaInference", "false") \
         .config("spark.sql.shuffle.partitions", "4") \
+        .config("spark.sql.session.timeZone", "UTC") \
         .getOrCreate()
     
     spark.sparkContext.setLogLevel("WARN")
@@ -85,12 +105,19 @@ if __name__ == "__main__":
         "timestamp",
         to_timestamp(col("time"))  # Auto-parse ISO 8601 format
     )
+
+    # Basic validation to avoid bad records breaking aggregations
+    stock_df = stock_df.filter(
+        col("ticker").isNotNull()
+        & col("timestamp").isNotNull()
+        & col("Close").isNotNull()
+    )
     
     # Tính toán các metrics cơ bản sử dụng time window aggregation
     windowed_df = stock_df \
-        .withWatermark("timestamp", "1 minute") \
+        .withWatermark("timestamp", WATERMARK_DELAY) \
         .groupBy(
-            window(col("timestamp"), "30 seconds"),
+            window(col("timestamp"), WINDOW_DURATION),
             col("ticker"),
             col("company")
         ) \
@@ -115,15 +142,22 @@ if __name__ == "__main__":
         col("total_volume").cast("long"),
         col("trade_count"),
         spark_round(col("price_volatility"), 2).alias("price_volatility"),
-        current_timestamp().alias("processed_time")
+        current_timestamp().alias("processed_time"),
+        # Deterministic ES document id to make writes idempotent (no duplicates on restart/replay)
+        concat_ws(
+            ":",
+            col("ticker"),
+            date_format(col("window.start"), "yyyyMMddHHmm"),
+        ).alias("doc_id"),
     )
     
     # Ghi vào Elasticsearch using foreachBatch (compatible with ES 7.17 + Spark 3.5)
     print("💾 Bắt đầu streaming vào Elasticsearch...")
     
     def write_to_es(batch_df, batch_id):
-        if batch_df.count() > 0:
-            print(f"\n📦 Processing batch {batch_id} with {batch_df.count()} records")
+        if batch_df.take(1):
+            record_count = batch_df.count()
+            print(f"\n📦 Processing batch {batch_id} with {record_count} records")
             batch_df.write \
                 .format("org.elasticsearch.spark.sql") \
                 .option("es.resource", ES_INDEX) \
@@ -132,27 +166,29 @@ if __name__ == "__main__":
                 .option("es.nodes.wan.only", "true") \
                 .option("es.batch.size.entries", "100") \
                 .option("es.write.operation", "index") \
+                .option("es.mapping.id", "doc_id") \
                 .mode("append") \
                 .save()
             print(f"✅ Batch {batch_id} written to Elasticsearch")
     
     query = output_df.writeStream \
-        .outputMode("append") \
+        .outputMode("update") \
         .foreachBatch(write_to_es) \
         .option("checkpointLocation", CHECKPOINT_LOCATION) \
         .start()
-    
-    # Console output
-    console_query = output_df.writeStream \
-        .outputMode("append") \
-        .format("console") \
-        .option("truncate", "false") \
-        .start()
+
+    if ENABLE_CONSOLE_SINK:
+        output_df.writeStream \
+            .outputMode("update") \
+            .format("console") \
+            .option("truncate", "false") \
+            .option("checkpointLocation", CONSOLE_CHECKPOINT_LOCATION) \
+            .start()
     
     print("\n" + "=" * 80)
     print("✅ STREAMING JOB ĐANG CHẠY (ForeachBatch mode)")
     print("=" * 80)
     print(f"📊 Dữ liệu được ghi vào: {ES_INDEX}")
-    print("📈 Window: 30 giây, Watermark: 1 phút\n")
+    print(f"📈 Window: {WINDOW_DURATION}, Watermark: {WATERMARK_DELAY}\n")
     
     query.awaitTermination()
