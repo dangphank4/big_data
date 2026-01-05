@@ -2,82 +2,102 @@ import json
 import time
 import logging
 import signal
+import sys
 from datetime import datetime
 
 from confluent_kafka import Consumer, KafkaException
 from hdfs import InsecureClient
-from hdfs.util import HdfsError
 
+# ============================================================================
 # LOGGING
+# ============================================================================
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - PID:%(process)d - %(message)s'
+    format="%(asctime)s - %(levelname)s - PID:%(process)d - %(message)s"
 )
-log = logging.getLogger(__name__)
+log = logging.getLogger("kafka-hdfs-consumer")
 
+# ============================================================================
 # CONFIG
+# ============================================================================
 KAFKA_BROKER_URL = "kafka:9092"
-KAFKA_TOPIC = 'stocks-history'
-KAFKA_GROUP_ID = 'hdfs-writer-group-final-v1'
+KAFKA_TOPIC = "stocks-history"
+KAFKA_GROUP_ID = "hdfs-writer-group-v1"
 
 HDFS_URL = "http://hadoop-namenode:9870"
-HDFS_USER = 'root'
-HDFS_BASE_PATH = '/user/kafka_data/real_estate_by_date'
+HDFS_USER = "root"
+HDFS_BASE_PATH = "/user/kafka_data/stocks_history"
 
 BATCH_SIZE = 100
 BATCH_INTERVAL_SECONDS = 60
+POLL_TIMEOUT = 1.0
+RETRY_DELAY = 10
 
-hdfs_client = None
+# ============================================================================
+# GLOBAL STATE
+# ============================================================================
+running = True
 consumer = None
-hdfs_ready = False
+hdfs_client = None
 
+# ============================================================================
+# SIGNAL HANDLING
+# ============================================================================
+def shutdown_handler(signum, frame):
+    global running
+    log.warning(f"Received signal {signum} → shutting down gracefully")
+    running = False
 
-# GHI FILE MỚI VÀO HDFS THEO NGÀY
-def write_data_to_new_hdfs_file(current_hdfs_client, base_path, batch_data):
-    global hdfs_ready, hdfs_client
+signal.signal(signal.SIGINT, shutdown_handler)
+signal.signal(signal.SIGTERM, shutdown_handler)
 
-    if not batch_data:
-        log.info("BATCH EMPTY → Không ghi.")
+# ============================================================================
+# HDFS WRITE
+# ============================================================================
+def write_batch_to_hdfs(client, base_path, records):
+    if not records:
         return True
 
     try:
         now = datetime.now()
-        date_path = now.strftime('%Y/%m/%d')
-        target_dir = f"{base_path}/{date_path}"
+        path = now.strftime("%Y/%m/%d/%H")
+        target_dir = f"{base_path}/{path}"
 
         filename = f"data_{now.strftime('%H%M%S%f')}.jsonl"
         full_path = f"{target_dir}/{filename}"
 
-        current_hdfs_client.makedirs(target_dir)
+        client.makedirs(target_dir)
 
-        data_string = "\n".join(json.dumps(r, ensure_ascii=False) for r in batch_data)
+        payload = "\n".join(
+            json.dumps(r, ensure_ascii=False) for r in records
+        )
 
-        with current_hdfs_client.write(full_path, encoding="utf-8") as w:
-            w.write(data_string)
+        with client.write(full_path, encoding="utf-8") as writer:
+            writer.write(payload)
 
-        log.info(f"WRITE SUCCESS: {len(batch_data)} records → {full_path}")
+        log.info(f"HDFS WRITE OK: {len(records)} records → {full_path}")
         return True
 
     except Exception as e:
-        log.error(f"HDFS ERROR: {e}", exc_info=True)
-        hdfs_ready = False
-        hdfs_client = None
+        log.error("HDFS WRITE FAILED", exc_info=True)
         return False
 
-
-# VÒNG LẶP CONSUME
-def consume_and_write():
-    global consumer, hdfs_client, hdfs_ready
+# ============================================================================
+# CONSUME LOOP
+# ============================================================================
+def consume_loop():
+    global consumer, hdfs_client
 
     batch = []
-    last_write = time.time()
+    last_flush = time.time()
 
-    log.info("Consumer READY → Listening Kafka...")
+    log.info("Consumer started")
 
-    while True:
-        msg = consumer.poll(1.0)
+    while running:
+        msg = consumer.poll(POLL_TIMEOUT)
 
         if msg is None:
+            time.sleep(0.1)
             continue
 
         if msg.error():
@@ -87,63 +107,67 @@ def consume_and_write():
         try:
             record = json.loads(msg.value().decode("utf-8"))
         except Exception:
-            log.error("JSON decode error")
+            log.error("Invalid JSON message")
             continue
 
         batch.append(record)
-
         now = time.time()
 
-        if len(batch) >= BATCH_SIZE or (now - last_write >= BATCH_INTERVAL_SECONDS):
-            ok = write_data_to_new_hdfs_file(hdfs_client, HDFS_BASE_PATH, batch)
+        if (
+            len(batch) >= BATCH_SIZE
+            or now - last_flush >= BATCH_INTERVAL_SECONDS
+        ):
+            ok = write_batch_to_hdfs(hdfs_client, HDFS_BASE_PATH, batch)
             if ok:
-                batch = []
-                last_write = now
+                consumer.commit(asynchronous=False)
+                batch.clear()
+                last_flush = now
             else:
-                log.error("WRITE FAIL → Exit session")
-                return
+                raise RuntimeError("HDFS write failed")
 
+    # FLUSH LAST BATCH
+    if batch:
+        log.info("Flushing remaining batch before exit")
+        if write_batch_to_hdfs(hdfs_client, HDFS_BASE_PATH, batch):
+            consumer.commit(asynchronous=False)
 
-# =========================================================
-# MAIN LOOP – AUTO RETRY
-# =========================================================
+# ============================================================================
+# MAIN – AUTO RESTART
+# ============================================================================
 if __name__ == "__main__":
-    retry_delay = 10
-
     while True:
-        # HDFS CONNECT
         try:
+            # HDFS CONNECT
             hdfs_client = InsecureClient(HDFS_URL, user=HDFS_USER)
             hdfs_client.makedirs(HDFS_BASE_PATH)
-            hdfs_ready = True
             log.info("HDFS CONNECTED")
-        except Exception as e:
-            log.error(f"Cannot connect HDFS: {e}")
-            time.sleep(retry_delay)
-            continue
 
-        # KAFKA CONNECT
-        settings = {
-            "bootstrap.servers": KAFKA_BROKER_URL,
-            "group.id": KAFKA_GROUP_ID,
-            "auto.offset.reset": "earliest"
-        }
+            # KAFKA CONNECT
+            consumer = Consumer({
+                "bootstrap.servers": KAFKA_BROKER_URL,
+                "group.id": KAFKA_GROUP_ID,
+                "auto.offset.reset": "earliest",
+                "enable.auto.commit": False
+            })
 
-        try:
-            consumer = Consumer(settings)
             consumer.subscribe([KAFKA_TOPIC])
             log.info("Kafka CONNECTED")
-        except KafkaException as e:
-            log.error(f"Cannot connect Kafka: {e}")
-            time.sleep(retry_delay)
-            continue
 
-        # START SESSION
-        try:
-            consume_and_write()
-        except Exception as e:
-            log.error("Fatal consumer error", exc_info=True)
+            consume_loop()
 
-        consumer.close()
-        log.warning("Restarting session...")
-        time.sleep(retry_delay)
+        except Exception:
+            log.error("SESSION ERROR", exc_info=True)
+
+        finally:
+            try:
+                if consumer:
+                    consumer.close()
+            except Exception:
+                pass
+
+            if not running:
+                log.info("Consumer shutdown completed")
+                sys.exit(0)
+
+            log.warning(f"Restarting session in {RETRY_DELAY}s...")
+            time.sleep(RETRY_DELAY)

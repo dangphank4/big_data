@@ -1,5 +1,4 @@
 #Xóa container cũ và network
-
 docker-compose down
 docker network prune -f
 docker volume prune -f

@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # ======================
   # ZOOKEEPER
@@ -32,6 +30,12 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # Retention and compaction for streaming/batch topics
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_CLEANER_ENABLE: "true"
+      KAFKA_LOG_RETENTION_BYTES: -1
+      KAFKA_MESSAGE_MAX_BYTES: 2000000
+      # Create topics lazily; manage via kafka-topics or tooling
     ports:
       - "9092:9092"
 
@@ -84,13 +88,14 @@ services:
   # ELASTICSEARCH
   # ======================
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.16
     container_name: elasticsearch
     networks:
       - bigdata-network
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"  # REST API
       - "9300:9300"  # Cluster internal communication
@@ -99,7 +104,7 @@ services:
   # KIBANA
   # ======================
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.0
+    image: docker.elastic.co/kibana/kibana:7.17.16
     container_name: kibana
     networks:
       - bigdata-network
@@ -107,6 +112,8 @@ services:
       - elasticsearch
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENABLED=false
     ports:
       - "5601:5601"  # UI Kibana
 
@@ -124,6 +131,38 @@ services:
       - hadoop-namenode
     tty: true
 
+  # ======================
+  # SPARK STREAMING - SIMPLE STOCK DATA
+  # ======================
+  spark-streaming-simple:
+    image: apache/spark:3.5.1
+    container_name: spark-streaming-simple
+    user: root
+    networks:
+      - bigdata-network
+    depends_on:
+      - kafka
+      - elasticsearch
+      - hadoop-namenode
+    volumes:
+      - ./:/app
+      - ./logs:/logs
+      - spark-ivy-cache:/home/spark/.ivy2
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[*]
+      --conf spark.sql.shuffle.partitions=4
+      --conf spark.sql.streaming.minBatchesToRetain=2
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+      /app/spark_streaming/spark_streaming_simple.py
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stock-realtime-topic
+      - ES_NODES=elasticsearch
+      - ES_PORT=9200
+      - ES_INDEX=stock_realtime
+      - CHECKPOINT_LOCATION=hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_realtime
+    restart: on-failure
 
 # ======================
 # VOLUMES
@@ -131,6 +170,7 @@ services:
 volumes:
   hdfs-namenode:
   hdfs-datanode:
+  spark-ivy-cache:
 
 networks:
   bigdata-network:

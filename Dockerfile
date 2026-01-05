@@ -5,7 +5,9 @@ WORKDIR /app
 # Copy code
 COPY kafka_producer.py kafka_consumer.py /app/
 COPY batch_jobs/ /app/batch/
-COPY history_all.json /app/data/
+COPY history.json /app/data/
+# Copy mã Python
+COPY kafka_producer.py kafka_consumer.py history.json /app/
 
 # Cài dependencies
 RUN pip install --no-cache-dir \

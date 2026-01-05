@@ -1,7 +1,7 @@
 import json
 import pandas as pd
 
-def load_history(json_file="history_all.json"):
+def load_history(json_file="history.json"):
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
