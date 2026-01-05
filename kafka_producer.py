@@ -128,6 +128,12 @@ def simulate_next_bar(state):
     state["last_close"] = float(round(new_close, 2))
     return state["last_close"], change_percent, vol
 
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+def stream_realtime_mode():
+    """Main function to run the Kafka producer in streaming mode."""
     latest_prices = load_latest_prices()
     if not latest_prices:
         print("[ERROR] No initial data, using defaults", flush=True)
@@ -151,6 +157,7 @@ def simulate_next_bar(state):
     print(f"[READY] {datetime.now()}: Starting data stream...", flush=True)
     
     try:
+        batch = 0  # Initialize batch counter
         while True:
             batch += 1
             timestamp = datetime.now().astimezone().isoformat()
@@ -174,17 +181,17 @@ def simulate_next_bar(state):
                 volume_boost = int(volume_base * (0.3 * (vol / 1.2) + 0.15 * (move_mag / 2.0)))
                 volume = int(clamp(volume_base + volume_boost, 1_000_000, 300_000_000))
                 
-                # Create message
+                # Create message - UNIFIED SCHEMA
                 message = {
                     "ticker": ticker,
                     "company": latest_prices[ticker].get("company", ticker),
                     "time": timestamp,
-                    "Open": price["Open"],
-                    "High": price["High"],
-                    "Low": price["Low"],
-                    "Close": price["Close"],
-                    "Adj Close": price["Close"],
-                    "Volume": int(random.randint(100_000, 5_000_000))
+                    "Open": round(new_open, 2),
+                    "High": round(new_high, 2),
+                    "Low": round(new_low, 2),
+                    "Close": round(new_close, 2),
+                    "Adj Close": round(new_close, 2),
+                    "Volume": volume
                 }
 
                 producer.produce(
@@ -194,10 +201,8 @@ def simulate_next_bar(state):
                     callback=delivery_report
                 )
 
-                state[ticker] = price["Close"]
-
             producer.flush()
-            print(f"[BATCH {batch}] Sent {len(TICKERS)} messages", flush=True)
+            print(f"[BATCH {batch}] {timestamp}: Sent {len(TICKERS)} messages", flush=True)
             time.sleep(UPDATE_INTERVAL)
 
     except KeyboardInterrupt:

@@ -72,19 +72,6 @@ services:
       - bigdata-network
 
   # ======================
-  # SPARK
-  # ======================
-  spark:
-    image: apache/spark:3.5.1
-    container_name: spark
-    networks:
-      - bigdata-network
-    environment:
-      - SPARK_MODE=master
-    ports:
-      - "18080:8080"
-
-  # ======================
   # ELASTICSEARCH
   # ======================
   elasticsearch:
@@ -132,7 +119,7 @@ services:
     tty: true
 
   # ======================
-  # SPARK STREAMING - SIMPLE STOCK DATA
+  # SPARK STREAMING - REALTIME STOCK METRICS
   # ======================
   spark-streaming-simple:
     image: apache/spark:3.5.1
@@ -157,7 +144,7 @@ services:
       /app/spark_streaming/spark_streaming_simple.py
     environment:
       - KAFKA_BROKER=kafka:9092
-      - KAFKA_TOPIC=stock-realtime-topic
+      - KAFKA_TOPIC=stocks-history
       - ES_NODES=elasticsearch
       - ES_PORT=9200
       - ES_INDEX=stock_realtime
