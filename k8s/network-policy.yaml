@@ -1,0 +1,65 @@
+---
+# NetworkPolicy cho bảo mật
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-network-policy
+  namespace: bigdata
+spec:
+  podSelector:
+    matchLabels:
+      app: kafka
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: kafka-producer
+    - podSelector:
+        matchLabels:
+          app: kafka-consumer
+    - podSelector:
+        matchLabels:
+          app: spark-streaming
+    ports:
+    - protocol: TCP
+      port: 9092
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: zookeeper
+    ports:
+    - protocol: TCP
+      port: 2181
+---
+# NetworkPolicy cho Elasticsearch
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: elasticsearch-network-policy
+  namespace: bigdata
+spec:
+  podSelector:
+    matchLabels:
+      app: elasticsearch
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: kibana
+    - podSelector:
+        matchLabels:
+          app: spark-streaming
+    - podSelector:
+        matchLabels:
+          app: batch-processing
+    ports:
+    - protocol: TCP
+      port: 9200
+    - protocol: TCP
+      port: 9300

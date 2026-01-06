@@ -1,0 +1,56 @@
+---
+# Ingress để expose các service ra ngoài
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bigdata-ingress
+  namespace: bigdata
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "bigdata-static-ip"  # Tạo trước trên GCP
+    networking.gke.io/managed-certificates: "bigdata-cert"
+    kubernetes.io/ingress.allow-http: "true"
+spec:
+  rules:
+  - host: kibana.yourdomain.com  # Thay domain của bạn
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kibana
+            port:
+              number: 5601
+  - host: hdfs.yourdomain.com  # HDFS NameNode UI
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hadoop-namenode
+            port:
+              number: 9870
+  - host: elasticsearch.yourdomain.com  # Elasticsearch API
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: elasticsearch
+            port:
+              number: 9200
+---
+# Managed Certificate for HTTPS
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: bigdata-cert
+  namespace: bigdata
+spec:
+  domains:
+    - kibana.yourdomain.com
+    - hdfs.yourdomain.com
+    - elasticsearch.yourdomain.com

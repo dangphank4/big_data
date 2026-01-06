@@ -1,0 +1,9 @@
+---
+# Namespace riêng cho hệ thống Big Data
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bigdata
+  labels:
+    name: bigdata
+    environment: production

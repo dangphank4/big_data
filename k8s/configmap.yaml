@@ -1,0 +1,31 @@
+---
+# ConfigMap cho các biến môi trường chung
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bigdata-config
+  namespace: bigdata
+data:
+  # Kafka Configuration
+  KAFKA_BROKER: "kafka:9092"
+  KAFKA_TOPIC: "stocks-history"
+  UPDATE_INTERVAL: "30"
+  TICKERS: "AAPL,NVDA,GOOGL,MSFT,TSLA"
+  
+  # HDFS Configuration
+  HDFS_URL: "http://hadoop-namenode:9870"
+  HDFS_USER: "root"
+  HDFS_BASE_PATH: "/user/kafka_data/stocks_history"
+  
+  # Elasticsearch Configuration
+  ELASTICSEARCH_HOST: "elasticsearch"
+  ELASTICSEARCH_PORT: "9200"
+  ES_NODES: "elasticsearch"
+  ES_INDEX: "stock_realtime"
+  
+  # Spark Streaming Configuration
+  CHECKPOINT_LOCATION: "hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_realtime_v1"
+  
+  # Batch Processing Configuration
+  BATCH_INTERVAL_HOURS: "24"
+  RUN_MODE: "all"
