@@ -1,37 +1,29 @@
+"""Batch job: Long-term trend analysis"""
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from standardization_local import (
+    FIELD_TICKER, FIELD_CLOSE, 
+    FIELD_MA_50, FIELD_MA_100, FIELD_MA_200, FIELD_TREND
+)
+
 # Xu hướng giá
 # Trend = up/down/sideway
-
-# ma20 - ma50
-# def batch_trend(df):
-#     df = df.copy()
-
-#     df["ma20"] = df.groupby("ticker")["Close"].transform(
-#         lambda x: x.rolling(20).mean()
-#     )
-
-#     df["ma50"] = df.groupby("ticker")["Close"].transform(
-#         lambda x: x.rolling(50).mean()
-#     )
-
-#     df["trend"] = "sideway"
-#     df.loc[df["ma20"] > df["ma50"], "trend"] = "up"
-#     df.loc[df["ma20"] < df["ma50"], "trend"] = "down"
-
-#     return df[["ticker", "time", "ma20", "ma50", "trend"]]
 
 #ma50 - ma200 + strength (long term)
 def batch_long_term_trend(df):
     df = df.copy()
 
     for w in [50, 100, 200]:
-        df[f"ma{w}"] = df.groupby("ticker")["Close"].transform(
+        df[f"ma{w}"] = df.groupby(FIELD_TICKER)[FIELD_CLOSE].transform(
             lambda x: x.rolling(w).mean()
         )
 
-    df["trend"] = "sideway"
-    df.loc[df["ma50"] > df["ma200"], "trend"] = "up"
-    df.loc[df["ma50"] < df["ma200"], "trend"] = "down"
+    df[FIELD_TREND] = "sideway"
+    df.loc[df[FIELD_MA_50] > df[FIELD_MA_200], FIELD_TREND] = "up"
+    df.loc[df[FIELD_MA_50] < df[FIELD_MA_200], FIELD_TREND] = "down"
 
-    df["trend_strength"] = (df["ma50"] - df["ma200"]) / df["Close"]
+    df["trend_strength"] = (df[FIELD_MA_50] - df[FIELD_MA_200]) / df[FIELD_CLOSE]
 
     return df

@@ -35,9 +35,18 @@ services:
       KAFKA_LOG_CLEANER_ENABLE: "true"
       KAFKA_LOG_RETENTION_BYTES: -1
       KAFKA_MESSAGE_MAX_BYTES: 2000000
-      # Create topics lazily; manage via kafka-topics or tooling
+      # Allow broker to auto-create topics on first access (dev-friendly).
+      # Note: topic creation is still asynchronous; use healthchecks/ordering to reduce races.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"
+
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "kafka-topics --bootstrap-server localhost:9092 --create --if-not-exists --topic stocks-history --replication-factor 1 --partitions 1 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   # ======================
   # HDFS (Hadoop)
@@ -70,19 +79,6 @@ services:
       - hdfs-datanode:/hadoop/dfs/data
     networks:
       - bigdata-network
-
-  # ======================
-  # SPARK
-  # ======================
-  spark:
-    image: apache/spark:3.5.1
-    container_name: spark
-    networks:
-      - bigdata-network
-    environment:
-      - SPARK_MODE=master
-    ports:
-      - "18080:8080"
 
   # ======================
   # ELASTICSEARCH
@@ -127,23 +123,28 @@ services:
     volumes:
       - ./:/app
     depends_on:
-      - kafka
-      - hadoop-namenode
+      kafka:
+        condition: service_healthy
+      hadoop-namenode:
+        condition: service_healthy
     tty: true
 
   # ======================
-  # SPARK STREAMING - SIMPLE STOCK DATA
+  # SPARK STREAMING - REALTIME STOCK METRICS
   # ======================
   spark-streaming-simple:
-    image: apache/spark:3.5.1
+    image: apache/spark:3.4.3
     container_name: spark-streaming-simple
     user: root
     networks:
       - bigdata-network
     depends_on:
-      - kafka
-      - elasticsearch
-      - hadoop-namenode
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+      hadoop-namenode:
+        condition: service_healthy
     volumes:
       - ./:/app
       - ./logs:/logs
@@ -153,15 +154,16 @@ services:
       --master local[*]
       --conf spark.sql.shuffle.partitions=4
       --conf spark.sql.streaming.minBatchesToRetain=2
-      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
       /app/spark_streaming/spark_streaming_simple.py
     environment:
       - KAFKA_BROKER=kafka:9092
-      - KAFKA_TOPIC=stock-realtime-topic
+      - KAFKA_TOPIC=stocks-history
       - ES_NODES=elasticsearch
       - ES_PORT=9200
       - ES_INDEX=stock_realtime
-      - CHECKPOINT_LOCATION=hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_realtime
+      # Bump suffix (e.g., _v2) if you change streaming aggregation/schema to avoid checkpoint state incompatibility.
+      - CHECKPOINT_LOCATION=hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_realtime_v1
     restart: on-failure
 
 # ======================
