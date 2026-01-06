@@ -94,10 +94,14 @@ def save_all_flat_history(tickers, json_file="history.json", interval="1d", star
         updated_records.extend(new_records)
 
     # ---- sort & save ----
-    updated_records = sorted(
-        updated_records,
-        key=lambda x: (x["ticker"], x["time"])
-    )
+        # ---- deduplicate, sort & save ----
+    # Loại bỏ bản ghi trùng theo khóa (ticker, time). Giữ bản ghi mới nhất nếu có trùng.
+    if updated_records:
+        df_updated = pd.DataFrame(updated_records)
+        df_updated = df_updated.drop_duplicates(subset=["ticker", "time"], keep="last")
+        updated_records = df_updated.sort_values(by=["ticker", "time"]).to_dict(orient="records")
+    else:
+        updated_records = []
 
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(updated_records, f, indent=4, ensure_ascii=False)
