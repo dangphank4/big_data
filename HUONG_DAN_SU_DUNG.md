@@ -252,8 +252,65 @@ http://localhost:5601
 1. Vào **Management** → **Stack Management** → **Index Patterns**
 2. Click **"Create index pattern"**
 3. Nhập: `stock_realtime`
-4. Chọn Time field: `window_start`
+4. Chọn Time field: `@timestamp` (khuyến nghị)
+   - Nếu bạn không thấy `@timestamp` thì có thể chọn tạm `window_start` (nếu có)
 5. Click **"Create index pattern"**
+
+Nếu **không chọn được Time field** (không thấy `@timestamp`/`window_start` trong dropdown):
+
+1. Kiểm tra Elasticsearch có nhận đúng kiểu `date` chưa:
+
+```bash
+curl -s "http://localhost:9200/stock_realtime/_mapping?pretty" | head -200
+```
+
+2. Nếu bạn thấy `@timestamp` đang bị map sai (ví dụ `long`), hãy reset index `stock_realtime` và tạo lại mapping chuẩn (sau đó restart Spark Streaming để bắn dữ liệu lại):
+
+```bash
+# Stop Spark để tránh ghi mapping sai lại ngay lập tức
+docker compose stop spark-streaming-simple
+
+# Xóa index cũ
+curl -X DELETE "http://localhost:9200/stock_realtime"
+
+# Tạo lại index với mapping có Time field kiểu date
+curl -X PUT "http://localhost:9200/stock_realtime" \
+  -H 'Content-Type: application/json' \
+  -d '
+{
+  "mappings": {
+    "properties": {
+      "@timestamp": { "type": "date" },
+      "window_start": { "type": "date" },
+      "window_end": { "type": "date" },
+      "processed_time": { "type": "date" },
+
+      "ticker": { "type": "keyword" },
+      "company": { "type": "keyword" },
+
+      "avg_price": { "type": "double" },
+      "min_price": { "type": "double" },
+      "max_price": { "type": "double" },
+      "price_volatility": { "type": "double" },
+      "total_volume": { "type": "long" },
+      "trade_count": { "type": "long" }
+    }
+  }
+}
+'
+
+# Start lại Spark Streaming
+docker compose start spark-streaming-simple
+
+# Đợi 1-2 phút rồi kiểm tra lại docs
+sleep 90
+curl -s "http://localhost:9200/stock_realtime/_count?pretty"
+```
+
+3. Quay lại Kibana:
+
+- Refresh trang Kibana (F5)
+- Nếu đã tạo index pattern rồi: vào Index Pattern → **Refresh field list** (hoặc xóa và tạo lại)
 
 #### Index Pattern 2: batch-features (Batch Data)
 
