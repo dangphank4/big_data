@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-streaming
+  namespace: bigdata
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-streaming
+  template:
+    metadata:
+      labels:
+        app: spark-streaming
+    spec:
+      containers:
+      - name: spark-streaming
+        image: apache/spark:3.4.3
+        command: ["/opt/spark/bin/spark-submit"]
+        args:
+          - "--master"
+          - "local[*]"
+          - "--conf"
+          - "spark.sql.shuffle.partitions=4"
+          - "--packages"
+          - "org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16"
+          - "/app/spark_streaming/spark_streaming_simple.py"
+        env:
+        - name: KAFKA_BROKER
+          value: kafka:9092
+        - name: KAFKA_TOPIC
+          value: stocks-history
+        - name: ES_NODES
+          value: elasticsearch
+        - name: ES_PORT
+          value: "9200"
+        - name: ES_INDEX
+          value: stock_realtime
+        - name: CHECKPOINT_LOCATION
+          value: hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_realtime_v1
+        volumeMounts:
+        - name: app-volume
+          mountPath: /app
+      volumes:
+      - name: app-volume
+        hostPath:
+          path: /full/path/to/your/project
