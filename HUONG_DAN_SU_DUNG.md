@@ -274,30 +274,9 @@ docker compose stop spark-streaming-simple
 curl -X DELETE "http://localhost:9200/stock_realtime"
 
 # Tạo lại index với mapping có Time field kiểu date
-curl -X PUT "http://localhost:9200/stock_realtime" \
-  -H 'Content-Type: application/json' \
-  -d '
-{
-  "mappings": {
-    "properties": {
-      "@timestamp": { "type": "date" },
-      "window_start": { "type": "date" },
-      "window_end": { "type": "date" },
-      "processed_time": { "type": "date" },
-
-      "ticker": { "type": "keyword" },
-      "company": { "type": "keyword" },
-
-      "avg_price": { "type": "double" },
-      "min_price": { "type": "double" },
-      "max_price": { "type": "double" },
-      "price_volatility": { "type": "double" },
-      "total_volume": { "type": "long" },
-      "trade_count": { "type": "long" }
-    }
-  }
-}
-'
+curl -X PUT "http://localhost:9200/stock_realtime" ^
+ -H "Content-Type: application/json" ^
+ -d "{\"mappings\":{\"properties\":{\"@timestamp\":{\"type\":\"date\"},\"window_start\":{\"type\":\"date\"},\"window_end\":{\"type\":\"date\"},\"processed_time\":{\"type\":\"date\"},\"ticker\":{\"type\":\"keyword\"},\"company\":{\"type\":\"keyword\"},\"avg_price\":{\"type\":\"double\"},\"min_price\":{\"type\":\"double\"},\"max_price\":{\"type\":\"double\"},\"price_volatility\":{\"type\":\"double\"},\"total_volume\":{\"type\":\"long\"},\"trade_count\":{\"type\":\"long\"}}}}"
 
 # Start lại Spark Streaming
 docker compose start spark-streaming-simple
