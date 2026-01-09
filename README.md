@@ -26,13 +26,23 @@ sleep 120
 curl -s "http://localhost:9200/_cat/indices?v" | grep stock
 ```
 
+Phải thấy 3 indexes:
+
+- `stock_realtime` - Real-time metrics (30s aggregations)
+- `stock_anomalies` - Price anomaly alerts
+- `batch-features` - Batch processing features (sau khi chạy batch)
+
 ### 2. Mở Kibana
 
 ```
 http://localhost:5601
 ```
 
-Tạo Index Pattern: `stock_realtime` với time field `@timestamp` (khuyến nghị). Nếu bạn muốn dùng cửa sổ thời gian, có thể chọn `window_start`.
+Tạo Index Patterns:
+
+1. `stock_realtime` với time field `@timestamp` - Real-time monitoring
+2. `stock_anomalies` với time field `@timestamp` - Anomaly alerts
+3. `batch-features` với time field `@timestamp` - Historical analysis
 
 ## 📖 Tài Liệu Chi Tiết
 
@@ -67,6 +77,24 @@ Producer sử dụng `price_simulator` để stream dữ liệu realtime:
 - Import từ `price_simulator`: `initialize_ticker_state`, `simulate_next_bar`, `generate_volume`
 - Đọc baseline từ `history.json`
 - Stream mỗi 30 giây (configurable)
+
+### Spark Streaming Jobs
+
+**1. Real-time Metrics (`spark_streaming_simple.py`)**
+
+- Aggregates 30s windows: avg price, volume, volatility
+- Writes to: `stock_realtime` index
+
+**2. Anomaly Detection (`spark_anomaly_detection.py`)**
+
+- Detects 4 types of anomalies:
+  - **Price Spike**: >5% price change in 30s
+  - **Volume Spike**: >3x average volume
+  - **High Volatility**: >3% volatility
+  - **Price Gap**: >2% gap between trades
+- Uses historical baseline (5 previous windows)
+- Writes to: `stock_anomalies` index
+- Real-time alerts for abnormal market behavior
 
 ## 📖 Tài Liệu Chi Tiết (Legacy)
 

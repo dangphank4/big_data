@@ -44,6 +44,8 @@ Hệ thống phân tích dữ liệu chứng khoán real-time và batch processi
 - **Luồng dữ liệu**:
   ```
   Kafka Producer → Kafka → Spark Streaming → Elasticsearch
+                     ↓         ↓
+                     ↓     Spark Anomaly Detection → Elasticsearch
                      ↓
                  Kafka Consumer → HDFS
   ```
@@ -54,6 +56,11 @@ Hệ thống phân tích dữ liệu chứng khoán real-time và batch processi
   - Khối lượng giao dịch tổng hợp
   - Độ biến động giá (volatility)
   - Min/Max giá trong cửa sổ
+  - **Price Anomaly Detection (NEW)**:
+    - Phát hiện tăng/giảm giá đột ngột (>5%)
+    - Phát hiện volume spike (>3x bình thường)
+    - Phát hiện volatility cao bất thường (>3%)
+    - Phát hiện price gap (>2%)
 
 #### 3. **Serving Layer**
 

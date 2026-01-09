@@ -166,6 +166,42 @@ services:
       - CHECKPOINT_LOCATION=hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_realtime_v1
     restart: on-failure
 
+  # ======================
+  # SPARK ANOMALY DETECTION - REALTIME PRICE ANOMALY DETECTION
+  # ======================
+  spark-anomaly-detection:
+    image: apache/spark:3.4.3
+    container_name: spark-anomaly-detection
+    user: root
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+      hadoop-namenode:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - ./logs:/logs
+      - spark-ivy-cache:/home/spark/.ivy2
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[*]
+      --conf spark.sql.shuffle.partitions=4
+      --conf spark.sql.streaming.minBatchesToRetain=2
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+      /app/spark_streaming/spark_anomaly_detection.py
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stocks-history
+      - ES_NODES=elasticsearch
+      - ES_PORT=9200
+      - ES_INDEX_ANOMALY=stock_anomalies
+      - CHECKPOINT_LOCATION_ANOMALY=hdfs://hadoop-namenode:9000/user/spark_checkpoints/stock_anomaly_v1
+    restart: on-failure
+
 # ======================
 # VOLUMES
 # ======================
