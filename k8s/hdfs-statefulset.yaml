@@ -1,0 +1,151 @@
+---
+# StatefulSet cho HDFS NameNode
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop-namenode
+  namespace: bigdata
+spec:
+  serviceName: hadoop-namenode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+  template:
+    metadata:
+      labels:
+        app: hadoop-namenode
+    spec:
+      containers:
+      - name: namenode
+        image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+        ports:
+        - containerPort: 9870
+          name: http
+        - containerPort: 9000
+          name: ipc
+        env:
+        - name: CLUSTER_NAME
+          value: "bigdata-cluster"
+        - name: CORE_CONF_fs_defaultFS
+          value: "hdfs://hadoop-namenode:9000"
+        - name: HDFS_CONF_dfs_namenode_name_dir
+          value: "file:///hadoop/dfs/name"
+        - name: HDFS_CONF_dfs_permissions_enabled
+          value: "false"
+        volumeMounts:
+        - name: namenode-storage
+          mountPath: /hadoop/dfs/name
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9870
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9870
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: namenode-storage
+        persistentVolumeClaim:
+          claimName: hdfs-namenode-pvc
+---
+# Service cho HDFS NameNode
+apiVersion: v1
+kind: Service
+metadata:
+  name: hadoop-namenode
+  namespace: bigdata
+spec:
+  type: ClusterIP
+  selector:
+    app: hadoop-namenode
+  ports:
+  - port: 9870
+    targetPort: 9870
+    name: http
+  - port: 9000
+    targetPort: 9000
+    name: ipc
+---
+# StatefulSet cho HDFS DataNode
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop-datanode
+  namespace: bigdata
+spec:
+  serviceName: hadoop-datanode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+  template:
+    metadata:
+      labels:
+        app: hadoop-datanode
+    spec:
+      containers:
+      - name: datanode
+        image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+        ports:
+        - containerPort: 9864
+          name: http
+        env:
+        - name: CORE_CONF_fs_defaultFS
+          value: "hdfs://hadoop-namenode:9000"
+        - name: HDFS_CONF_dfs_datanode_data_dir
+          value: "file:///hadoop/dfs/data"
+        - name: SERVICE_PRECONDITION
+          value: "hadoop-namenode:9870"
+        volumeMounts:
+        - name: datanode-storage
+          mountPath: /hadoop/dfs/data
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: datanode-storage
+        persistentVolumeClaim:
+          claimName: hdfs-datanode-pvc
+---
+# Service cho HDFS DataNode
+apiVersion: v1
+kind: Service
+metadata:
+  name: hadoop-datanode
+  namespace: bigdata
+spec:
+  type: ClusterIP
+  selector:
+    app: hadoop-datanode
+  ports:
+  - port: 9864
+    targetPort: 9864
+    name: http

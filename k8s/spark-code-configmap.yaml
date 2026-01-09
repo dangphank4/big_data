@@ -1,0 +1,81 @@
+---
+# ConfigMap containing Spark application code
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spark-app-code
+  namespace: bigdata
+data:
+  # Spark Streaming application
+  spark_streaming_simple.py: |
+    # This is a placeholder - Will be mounted from actual file
+    # In practice, we should use a better approach like:
+    # 1. Bake code into Docker image (recommended)
+    # 2. Mount from Git repo using initContainer
+    # 3. Use ConfigMap for small scripts only
+    
+    # For now, the actual deployment uses the image that contains the code
+    pass
+  
+  standardization_local.py: |
+    # Schema definitions - mounted from actual file
+    pass
+
+---
+# Alternative: Use initContainer to clone from Git
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-streaming-with-git
+  namespace: bigdata
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-streaming
+  template:
+    metadata:
+      labels:
+        app: spark-streaming
+    spec:
+      initContainers:
+      - name: git-clone
+        image: alpine/git
+        command:
+        - sh
+        - -c
+        - |
+          git clone https://github.com/your-repo/big_data.git /app
+          # Or use specific branch/tag
+          # git clone -b main --single-branch https://github.com/your-repo/big_data.git /app
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+      containers:
+      - name: spark-streaming
+        image: apache/spark:3.4.3
+        command:
+        - /opt/spark/bin/spark-submit
+        - --master
+        - local[*]
+        - --conf
+        - spark.sql.shuffle.partitions=4
+        - --packages
+        - org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+        - /app/spark_streaming/spark_streaming_simple.py
+        envFrom:
+        - configMapRef:
+            name: bigdata-config
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+      volumes:
+      - name: app-code
+        emptyDir: {}

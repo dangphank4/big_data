@@ -1,0 +1,39 @@
+---
+# Deployment cho Kafka Consumer (HDFS Writer)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-consumer
+  namespace: bigdata
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-consumer
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer
+    spec:
+      containers:
+      - name: kafka-consumer
+        image: gcr.io/PROJECT_ID/bigdata-python-worker:latest  # Thay PROJECT_ID
+        command: ["python", "/app/kafka_consumer.py"]
+        envFrom:
+        - configMapRef:
+            name: bigdata-config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 30
+          periodSeconds: 30
