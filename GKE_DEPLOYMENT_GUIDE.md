@@ -299,7 +299,7 @@ cd /path/to/big_data
 
 # Verify structure
 ls -la
-# Phải thấy: Dockerfile, docker-compose.yml, k8s/, batch_jobs/, etc.
+# Phải thấy: Dockerfile, docker-compose.yml, k8s/, batch_jobs/, price_simulator.py, kafka_producer.py, etc.
 ```
 
 ---
@@ -315,7 +315,8 @@ export IMAGE_NAME="bigdata-python-worker"
 export IMAGE_TAG="v1.0.0"
 export FULL_IMAGE_NAME="gcr.io/${PROJECT_ID}/${IMAGE_NAME}:${IMAGE_TAG}"
 
-# Build image
+# Build image (sử dụng Dockerfile hoặc Dockerfile.production)
+# Dockerfile đã bao gồm price_simulator.py
 docker build -t ${FULL_IMAGE_NAME} -f Dockerfile .
 
 # Test image locally (optional)
