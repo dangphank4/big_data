@@ -30,7 +30,7 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy application code
-COPY kafka_producer.py kafka_consumer.py /app/
+COPY kafka_producer.py kafka_consumer.py price_simulator.py /app/
 COPY standardization_local.py unified_runner.py run_all.py /app/
 COPY batch_jobs/ /app/batch_jobs/
 COPY history.json /app/

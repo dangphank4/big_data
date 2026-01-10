@@ -17,6 +17,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                    KAFKA PRODUCER                             │
 │  - Đọc history.json làm baseline                             │
+│  - Sử dụng price_simulator.py để mô phỏng giá realtime      │
 │  - Simulate realtime prices với volatility động              │
 │  - Gửi vào topic: stocks-history                             │
 │  - Schema thống nhất: ticker, company, time, OHLCV           │

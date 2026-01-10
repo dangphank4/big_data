@@ -6,7 +6,7 @@ WORKDIR /app
 COPY requirements.txt /app/
 
 # Copy code
-COPY kafka_producer.py kafka_consumer.py standardization_local.py unified_runner.py run_all.py /app/
+COPY kafka_producer.py kafka_consumer.py price_simulator.py standardization_local.py unified_runner.py run_all.py /app/
 COPY batch_jobs/ /app/batch_jobs/
 COPY history.json /app/
 
