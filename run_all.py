@@ -1,113 +1,87 @@
-from standardization_local import load_history
+import os
+import sys
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 from batch_jobs.batch_trend import batch_long_term_trend
 from batch_jobs.drawdown import batch_drawdown
 from batch_jobs.cumulative_return import batch_cumulative_return
 from batch_jobs.volume_features import batch_volume_features
 from batch_jobs.market_regime import batch_market_regime
-from batch_jobs.monthly import (
-    batch_monthly_return,
-    batch_monthly_volatility
-)
-
-from elasticsearch import Elasticsearch, helpers
-from hdfs import InsecureClient
-import os
-# Fix
-import gc
-# Fix
-
-
-def write_to_hdfs(client, hdfs_path, df):
-    """Write DataFrame to HDFS as JSON"""
-    try:
-        # Reset index to avoid complex index serialization issues
-        df_to_write = df.reset_index(drop=True).copy()
-        
-        # Convert problematic types to strings
-        for col in df_to_write.columns:
-            if df_to_write[col].dtype == 'object' or str(df_to_write[col].dtype).startswith('period'):
-                df_to_write[col] = df_to_write[col].astype(str)
-        
-        json_data = df_to_write.to_json(orient="records", date_format="iso")
-        
-        with client.write(hdfs_path, overwrite=True) as writer:
-            writer.write(json_data.encode("utf-8"))
-            
-    except Exception as e:
-        raise Exception(f"Failed to write to HDFS: {e}")
-
-def write_to_elasticsearch(df, index_name):
-    # Use environment variable or default to elasticsearch service
-    es_host = os.getenv("ELASTICSEARCH_HOST", "elasticsearch")
-    es_port = os.getenv("ELASTICSEARCH_PORT", "9200")
-    es = Elasticsearch(
-        [f"http://{es_host}:{es_port}"],
-        # Force client to work with older server versions
-        headers={"Accept": "application/vnd.elasticsearch+json; compatible-with=7"}
-    )
-
-    actions = []
-    for _, row in df.iterrows():
-        doc = row.to_dict()
-
-        if "date" in doc:
-            doc["@timestamp"] = doc["date"]
-
-        actions.append({
-            "_index": index_name,
-            "_source": doc
-        })
-
-    helpers.bulk(es, actions)
-    print(f"Indexed {len(actions)} documents into {index_name}")
+from batch_jobs.monthly import batch_monthly_volatility
 
 def main():
-    # Load dữ liệu lịch sử
-    df = load_history("history.json")
+    #Khởi tạo SparkSession
+    spark = SparkSession.builder \
+        .appName("BigData_Stock_Batch") \
+        .config("spark.sql.session.timeZone", "UTC") \
+        .getOrCreate()
 
-    # Ép kiểu để tiết kiệm RAM
-    for col in ["Open", "High", "Low", "Close", "Volume"]:
-        if col in df.columns:
-            df[col] = df[col].astype("float32")
+    print("=== [1] ĐANG LẬP KẾ HOẠCH ĐỌC DỮ LIỆU ===")
+    # Đọc history.json. Spark chưa đọc ngay, nó chỉ kiểm tra cấu trúc file (Lazy Evaluation)
+    df = spark.read.json("history.json", multiLine=True)
 
-    # Tính toán Batch Features
+    # Chuẩn hóa cột thời gian và ép kiểu (Spark tự tối ưu hóa kiểu số)
+    if "time" in df.columns:
+        df = df.withColumn("time", F.to_timestamp("time"))
+    
+    for col_name in ["Open", "High", "Low", "Close", "Volume"]:
+        if col_name in df.columns:
+            df = df.withColumn(col_name, F.col(col_name).cast("float"))
+
+    print("=== [2] XÂY DỰNG CHUỖI TÍNH TOÁN (TRANSFORMATIONS) ===")
+    # DataFrame cũ không mất đi, mỗi hàm tạo ra một "phiên bản" mới có thêm cột
     df = batch_long_term_trend(df)
     df = batch_cumulative_return(df)
     df = batch_drawdown(df)
     df = batch_volume_features(df)
 
-    # Xử lý dữ liệu theo tháng
-    monthly_vol = batch_monthly_volatility(df.copy())
-    df["month"] = df["time"].dt.to_period("M")
-    df = df.merge(monthly_vol, on=["ticker", "month"], how="left")
-    df = batch_market_regime(df)
+    # Xử lý logic hàng tháng bằng Join phân tán
+    # Tạo cột month dùng chung
+    df = df.withColumn("month", F.date_format(F.col("time"), "yyyy-MM"))
     
-    #  Xóa rác bộ nhớ
-    gc.collect()
+    # Tính Volatility (một nhánh tính toán riêng)
+    monthly_vol = batch_monthly_volatility(df)
+    
+    # Gộp lại bằng Join
+    df = df.join(monthly_vol, on=["ticker", "month"], how="left")
+    
+    # Phân loại thị trường sau khi đã có đủ các cột đặc trưng
+    df = batch_market_regime(df)
 
-    # HDFS lưu trữ toàn bộ dữ liệu (kể cả những dòng có NaN để làm lịch sử đầy đủ)
-    print("BAT ĐẦU ĐẨY DỮ LIỆU LÊN HDFS...")
-    hdfs_client = InsecureClient("http://hadoop-namenode:9870", user="root")
+    print("=== [3] THỰC THI VÀ ĐẨY DỮ LIỆU (ACTIONS) ===")
+    
+    # Đẩy lên HDFS - Lúc này Spark mới thực sự chạy MapReduce để tính toán
+    hdfs_path = "hdfs://hadoop-namenode:9000/tmp/serving/batch_features"
     try:
-        hdfs_client.makedirs("/tmp/serving")
-        write_to_hdfs(hdfs_client, "/tmp/serving/batch_features.json", df)
-        print("DONE: Đã lưu vào HDFS tại /tmp/serving/batch_features.json")
+        # Ghi đè (overwrite) kết quả vào HDFS dưới dạng JSON phân tán
+        df.write.mode("overwrite").json(hdfs_path)
+        print(f"DONE: Đã lưu kết quả phân tán vào HDFS: {hdfs_path}")
     except Exception as e:
         print(f"LỖI HDFS: {e}")
 
-    #  Chỉ lấy dữ liệu sạch (không NaN) để đẩy lên ES vẽ biểu đồ
-    df_clean = df.dropna().copy()
-    
-    # Chuyển sang String để ES hiểu được
-    df_to_es = df_clean.copy()
-    df_to_es["month"] = df_to_es["month"].astype(str)
-    df_to_es["time"] = df_to_es["time"].astype(str)
+    # Đẩy lên Elasticsearch (Serving Layer)
+    # Lấy dữ liệu sạch (không NaN)
+    df_clean = df.dropna()
 
-    print("BAT ĐẦU ĐẨY DỮ LIỆU LÊN ELASTICSEARCH...")
-    write_to_elasticsearch(df_to_es, "batch-features")
+    print("Đang chuẩn bị dữ liệu cho Elasticsearch...")
+    pdf = df_clean.toPandas() 
     
-    print("DONE! HỆ THỐNG ĐÃ CẬP NHẬT CẢ HDFS VÀ ELASTICSEARCH.")
+    from elasticsearch import Elasticsearch, helpers
+    es = Elasticsearch([f"http://{os.getenv('ELASTICSEARCH_HOST', 'elasticsearch')}:9200"])
+    
+    actions = [
+        {
+            "_index": "batch-features",
+            "_source": {k: (str(v) if "month" in k or "time" in k else v) for k, v in row.items()}
+        }
+        for _, row in pdf.iterrows()
+    ]
+    
+    helpers.bulk(es, actions)
+    print(f"DONE: Đã đẩy {len(actions)} bản ghi lên Elasticsearch.")
+
+    spark.stop()
 
 if __name__ == "__main__":
     main()
