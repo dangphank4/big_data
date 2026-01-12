@@ -1,19 +1,23 @@
-"""Batch job: Volume features and liquidity analysis"""
+"""Batch job: Volume features and liquidity analysis using PySpark"""
 import sys
 import os
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from standardization_local import FIELD_TICKER, FIELD_VOLUME
-
-# Đo thanh khoản và giao dịch bất thường của cổ phiếu
+from standardization_local import FIELD_TICKER, FIELD_VOLUME, FIELD_TIME
 
 def batch_volume_features(df):
-    df = df.copy()
+    """
+    Tính toán trung bình động khối lượng (Volume MA20) và tỷ lệ khối lượng (Volume Ratio).
+    """
+    # Định nghĩa Window: Phân vùng theo mã cổ phiếu và sắp xếp theo thời gian
+    window_volume = Window.partitionBy(FIELD_TICKER).orderBy(FIELD_TIME).rowsBetween(-19, 0)
 
-    df["volume_ma20"] = df.groupby(FIELD_TICKER)[FIELD_VOLUME].transform(
-        lambda x: x.rolling(20).mean()
-    )
+    # Tính Volume MA20 (Trung bình động khối lượng 20 phiên)
+    df = df.withColumn("volume_ma20", F.avg(F.col(FIELD_VOLUME)).over(window_volume))
 
-    df["volume_ratio"] = df[FIELD_VOLUME] / df["volume_ma20"]
+    # Tính Volume Ratio (Tỷ lệ khối lượng hiện tại so với trung bình)
+    df = df.withColumn("volume_ratio", F.col(FIELD_VOLUME) / F.col("volume_ma20"))
 
     return df

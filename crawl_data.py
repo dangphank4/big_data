@@ -37,17 +37,23 @@ def save_all_flat_history(
     end=None
 ):
     # ---- parse datetime ----
+    # Hỗ trợ cả định dạng "%Y-%m-%d" (ngày) và "%Y-%m-%d %H:%M" (ngày giờ phút)
     if isinstance(start, str):
-        start = datetime.strptime(start, "%Y-%m-%d %H:%M")
+        try:
+            start = datetime.strptime(start, "%Y-%m-%d %H:%M")
+        except ValueError:
+            start = datetime.strptime(start, "%Y-%m-%d")
+    
     if isinstance(end, str):
-        end = datetime.strptime(end, "%Y-%m-%d %H:%M")
+        try:
+            end = datetime.strptime(end, "%Y-%m-%d %H:%M")
+        except ValueError:
+            end = datetime.strptime(end, "%Y-%m-%d")
 
-# =====================================================
-# Load 1 file duy nhất và update history FLAT JSON
-# =====================================================
-# def save_all_flat_history(tickers, json_file="history_all.json", start="2025-04-01"):
+    # =====================================================
+    # Load 1 file duy nhất và update history FLAT JSON
+    # =====================================================
 
-def save_all_flat_history(tickers, json_file="history.json", interval="1d", start="2023-01-01", end=None):
     # Load file cũ (nếu có)
     # ---- load old data ----
     if os.path.exists(json_file):
@@ -110,10 +116,14 @@ def save_all_flat_history(tickers, json_file="history.json", interval="1d", star
     return updated_records
 
 if __name__ == "__main__":
+    # Ví dụ: Lưu theo ngày
     save_all_flat_history(
         tickers=["AAPL", "NVDA"], 
         json_file="history.json",
-        interval="1d",         
-        start="2023-01-01",    
-        end="2026-01-05"
+        interval="15m",    #1d, 1h, 1m tuy chon     
+        start="2026-01-05",    
+        end="2026-01-10"
     )
+    #1m	~7 ngày gần nhất
+    #5m–60m	~60 ngày gần nhất
+    #1d	Không giới hạn

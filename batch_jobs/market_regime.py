@@ -1,30 +1,31 @@
-"""Batch job: Market regime classification"""
+"""Batch job: Market regime classification using PySpark"""
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pyspark.sql import functions as F
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from standardization_local import FIELD_MA_50, FIELD_MA_200, FIELD_MONTHLY_VOLATILITY
 
-# Phân loại thị trường, cổ phiếu
-
 def batch_market_regime(df):
-    df = df.copy()
-
-    df["market_regime"] = "normal"
-
-    df.loc[
-        (df[FIELD_MA_50] > df[FIELD_MA_200]) & (df[FIELD_MONTHLY_VOLATILITY] < 0.02),
-        "market_regime"
-    ] = "bull"
-
-    df.loc[
-        (df[FIELD_MA_50] < df[FIELD_MA_200]) & (df[FIELD_MONTHLY_VOLATILITY] > 0.03),
-        "market_regime"
-    ] = "bear"
-    
-    df.loc[
-        df[FIELD_MONTHLY_VOLATILITY] > 0.05,
-        "market_regime"
-    ] = "high_vol"
+    """
+    Phân loại trạng thái thị trường dựa trên các đường MA và độ biến động.
+    """
+    df = df.withColumn("market_regime", 
+        F.when(
+            (F.col(FIELD_MA_50) > F.col(FIELD_MA_200)) & 
+            (F.col(FIELD_MONTHLY_VOLATILITY) < 0.02), 
+            "bull"
+        )
+        .when(
+            (F.col(FIELD_MA_50) < F.col(FIELD_MA_200)) & 
+            (F.col(FIELD_MONTHLY_VOLATILITY) > 0.03), 
+            "bear"
+        )
+        .when(
+            F.col(FIELD_MONTHLY_VOLATILITY) > 0.05, 
+            "high_vol"
+        )
+        .otherwise("normal")
+    )
 
     return df
