@@ -1,20 +1,49 @@
 FROM python:3.12-slim
 
+# ===============================
+# METADATA
+# ===============================
+LABEL maintainer="bigdata-stack"
+LABEL description="Kafka Producer / Consumer / Stock Crawler"
+
+# ===============================
+# WORKDIR
+# ===============================
 WORKDIR /app
 
-# Copy dependency manifest first for better layer caching
-COPY requirements.txt /app/
+# ===============================
+# SYSTEM DEPENDENCIES
+# (required by confluent-kafka)
+# ===============================
+RUN apt-get update && apt-get install -y \
+    gcc \
+    librdkafka-dev \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy code
-COPY kafka_producer.py kafka_consumer.py price_simulator.py standardization_local.py unified_runner.py run_all.py /app/
-COPY batch_jobs/ /app/batch_jobs/
-COPY history.json /app/
+# ===============================
+# PYTHON DEPENDENCIES
+# ===============================
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# ===============================
+# APPLICATION CODE
+# ===============================
+COPY crawl_data.py .
+COPY kafka_producer.py .
+COPY kafka_consumer.py .
+COPY price_simulator.py .
 
-# Tạo thư mục output
-RUN mkdir -p /app/output
+# ===============================
+# ENVIRONMENT
+# ===============================
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Keep container running (use docker exec to run batch jobs manually)
-CMD ["tail", "-f", "/dev/null"]
+# ===============================
+# DEFAULT CMD
+# Giữ container sống để docker exec / override bằng compose
+# ===============================
+CMD ["sleep", "infinity"]

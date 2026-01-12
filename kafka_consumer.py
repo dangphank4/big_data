@@ -1,11 +1,17 @@
+"""
+KAFKA CONSUMER → HDFS WRITER
+Consumes flat stock JSON records and writes to HDFS (JSONL)
+"""
+
 import json
 import time
 import logging
 import signal
 import sys
 from datetime import datetime
+from typing import List
 
-from confluent_kafka import Consumer, KafkaException
+from confluent_kafka import Consumer
 from hdfs import InsecureClient
 
 # ============================================================================
@@ -13,40 +19,40 @@ from hdfs import InsecureClient
 # ============================================================================
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - PID:%(process)d - %(message)s"
+    format="%(asctime)s | %(levelname)s | PID:%(process)d | %(message)s"
 )
 log = logging.getLogger("kafka-hdfs-consumer")
 
 # ============================================================================
 # CONFIG
 # ============================================================================
-KAFKA_BROKER_URL = "kafka:9092"
+KAFKA_BROKER = "kafka:9092"
 KAFKA_TOPIC = "stocks-history"
-KAFKA_GROUP_ID = "hdfs-writer-group-v1"
+KAFKA_GROUP_ID = "hdfs-writer-v1"
 
 HDFS_URL = "http://hadoop-namenode:9870"
 HDFS_USER = "root"
-HDFS_BASE_PATH = "/user/kafka_data/stocks_history"
+HDFS_BASE_PATH = "/data/stock/history"
 
-BATCH_SIZE = 100
-BATCH_INTERVAL_SECONDS = 60
 POLL_TIMEOUT = 1.0
+BATCH_SIZE = 200
+BATCH_INTERVAL_SEC = 60
 RETRY_DELAY = 10
 
-# ============================================================================
-# GLOBAL STATE
 # ============================================================================
 running = True
 consumer = None
 hdfs_client = None
+
 
 # ============================================================================
 # SIGNAL HANDLING
 # ============================================================================
 def shutdown_handler(signum, frame):
     global running
-    log.warning(f"Received signal {signum} → shutting down gracefully")
+    log.warning(f"Signal {signum} received → shutdown requested")
     running = False
+
 
 signal.signal(signal.SIGINT, shutdown_handler)
 signal.signal(signal.SIGTERM, shutdown_handler)
@@ -54,19 +60,28 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 # ============================================================================
 # HDFS WRITE
 # ============================================================================
-def write_batch_to_hdfs(client, base_path, records):
+def write_batch_to_hdfs(
+    client: InsecureClient,
+    base_path: str,
+    records: List[dict]
+) -> bool:
     if not records:
         return True
 
     try:
-        now = datetime.now()
-        path = now.strftime("%Y/%m/%d/%H")
-        target_dir = f"{base_path}/{path}"
+        now = datetime.utcnow()
 
-        filename = f"data_{now.strftime('%H%M%S%f')}.jsonl"
-        full_path = f"{target_dir}/{filename}"
+        # Partitioned path: date=YYYY-MM-DD/hour=HH
+        dir_path = (
+            f"{base_path}/"
+            f"date={now.strftime('%Y-%m-%d')}/"
+            f"hour={now.strftime('%H')}"
+        )
 
-        client.makedirs(target_dir)
+        filename = f"part-{now.strftime('%Y%m%d%H%M%S%f')}.jsonl"
+        full_path = f"{dir_path}/{filename}"
+
+        client.makedirs(dir_path)
 
         payload = "\n".join(
             json.dumps(r, ensure_ascii=False) for r in records
@@ -75,12 +90,13 @@ def write_batch_to_hdfs(client, base_path, records):
         with client.write(full_path, encoding="utf-8") as writer:
             writer.write(payload)
 
-        log.info(f"HDFS WRITE OK: {len(records)} records → {full_path}")
+        log.info(f"HDFS WRITE OK | {len(records)} records → {full_path}")
         return True
 
-    except Exception as e:
-        log.error("HDFS WRITE FAILED", exc_info=True)
+    except Exception:
+        log.exception("HDFS WRITE FAILED")
         return False
+
 
 # ============================================================================
 # CONSUME LOOP
@@ -88,16 +104,16 @@ def write_batch_to_hdfs(client, base_path, records):
 def consume_loop():
     global consumer, hdfs_client
 
-    batch = []
+    buffer = []
     last_flush = time.time()
 
-    log.info("Consumer started")
+    log.info("Consume loop started")
 
     while running:
         msg = consumer.poll(POLL_TIMEOUT)
 
         if msg is None:
-            time.sleep(0.1)
+            time.sleep(0.05)
             continue
 
         if msg.error():
@@ -107,56 +123,56 @@ def consume_loop():
         try:
             record = json.loads(msg.value().decode("utf-8"))
         except Exception:
-            log.error("Invalid JSON message")
+            log.error("Invalid JSON message – skipped")
             continue
 
-        batch.append(record)
+        buffer.append(record)
         now = time.time()
 
         if (
-            len(batch) >= BATCH_SIZE
-            or now - last_flush >= BATCH_INTERVAL_SECONDS
+            len(buffer) >= BATCH_SIZE
+            or now - last_flush >= BATCH_INTERVAL_SEC
         ):
-            ok = write_batch_to_hdfs(hdfs_client, HDFS_BASE_PATH, batch)
-            if ok:
+            if write_batch_to_hdfs(hdfs_client, HDFS_BASE_PATH, buffer):
                 consumer.commit(asynchronous=False)
-                batch.clear()
+                buffer.clear()
                 last_flush = now
             else:
                 raise RuntimeError("HDFS write failed")
 
-    # FLUSH LAST BATCH
-    if batch:
-        log.info("Flushing remaining batch before exit")
-        if write_batch_to_hdfs(hdfs_client, HDFS_BASE_PATH, batch):
+    # graceful shutdown flush
+    if buffer:
+        log.info("Flushing remaining messages before shutdown")
+        if write_batch_to_hdfs(hdfs_client, HDFS_BASE_PATH, buffer):
             consumer.commit(asynchronous=False)
 
+
 # ============================================================================
-# MAIN – AUTO RESTART
+# MAIN
 # ============================================================================
 if __name__ == "__main__":
     while True:
         try:
-            # HDFS CONNECT
+            # HDFS
             hdfs_client = InsecureClient(HDFS_URL, user=HDFS_USER)
             hdfs_client.makedirs(HDFS_BASE_PATH)
-            log.info("HDFS CONNECTED")
+            log.info("HDFS connected")
 
-            # KAFKA CONNECT
+            # Kafka
             consumer = Consumer({
-                "bootstrap.servers": KAFKA_BROKER_URL,
+                "bootstrap.servers": KAFKA_BROKER,
                 "group.id": KAFKA_GROUP_ID,
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": False
             })
 
             consumer.subscribe([KAFKA_TOPIC])
-            log.info("Kafka CONNECTED")
+            log.info("Kafka connected – start consuming")
 
             consume_loop()
 
         except Exception:
-            log.error("SESSION ERROR", exc_info=True)
+            log.exception("Consumer session error")
 
         finally:
             try:
@@ -169,5 +185,5 @@ if __name__ == "__main__":
                 log.info("Consumer shutdown completed")
                 sys.exit(0)
 
-            log.warning(f"Restarting session in {RETRY_DELAY}s...")
+            log.warning(f"Restarting in {RETRY_DELAY}s...")
             time.sleep(RETRY_DELAY)

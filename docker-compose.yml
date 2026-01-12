@@ -113,6 +113,42 @@ services:
     ports:
       - "5601:5601"  # UI Kibana
 
+  stock-producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-producer
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: python kafka_producer.py
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stocks-history
+    restart: unless-stopped
+
+  kafka-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kafka-consumer
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      hadoop-namenode:
+        condition: service_healthy
+    command: python kafka_consumer.py
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stocks-history
+      - HDFS_URL=hdfs://hadoop-namenode:9000
+      - HDFS_PATH=/data/stocks/history
+    restart: unless-stopped
+
   python-worker:
     build:
       context: .
@@ -125,9 +161,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      hadoop-namenode:
-        condition: service_healthy
-    tty: true
+    command: ["sleep", "infinity"]
+
 
   # ======================
   # SPARK STREAMING - REALTIME STOCK METRICS

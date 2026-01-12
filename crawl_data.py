@@ -1,129 +1,126 @@
-import os
-import json
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+from typing import List, Dict, Iterable
 
 
-def df_to_flat_json(df: pd.DataFrame, ticker: str, company: str):
-    records = []
+class CrawlData:
+    """
+    Crawl stock data from yfinance and return flat JSON records
+    """
 
-    df2 = df.copy()
+    def __init__(self, interval: str = "1d"):
+        self.interval = interval
 
-    # Nếu cột là MultiIndex (Open, High + ticker)
-    if isinstance(df2.columns, pd.MultiIndex):
-        df2.columns = df2.columns.get_level_values(0)
+    @staticmethod
+    def _parse_datetime(dt):
+        """
+        Hỗ trợ:
+        - YYYY-MM-DD
+        - YYYY-MM-DD HH:MM
+        """
+        if isinstance(dt, str):
+            try:
+                return datetime.strptime(dt, "%Y-%m-%d %H:%M")
+            except ValueError:
+                return datetime.strptime(dt, "%Y-%m-%d")
+        return dt
 
-    df2.index = df2.index.astype(str)
-    df2 = df2.where(pd.notnull(df2), None)
+    @staticmethod
+    def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Chuẩn hoá dataframe:
+        - Bỏ MultiIndex
+        - index → string
+        - NaN → None
+        """
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
-    for t, row in df2.iterrows():
-        rec = {
-            "ticker": ticker,
-            "company": company,
-            "time": t
-        }
-        rec.update(row.to_dict())
-        records.append(rec)
+        df.index = df.index.astype(str)
+        df = df.where(pd.notnull(df), None)
+        return df
 
-    return records
+    @staticmethod
+    def _df_to_flat_records(
+        df: pd.DataFrame,
+        ticker: str,
+        company: str
+    ) -> List[Dict]:
+        """
+        DataFrame → flat JSON records
+        """
+        records = []
 
+        for t, row in df.iterrows():
+            rec = {
+                "ticker": ticker,
+                "company": company,
+                "time": t
+            }
+            rec.update(row.to_dict())
+            records.append(rec)
 
-def save_all_flat_history(
-    tickers,
-    json_file="history.json",
-    interval="15m",
-    start=None,
-    end=None
-):
-    # ---- parse datetime ----
-    # Hỗ trợ cả định dạng "%Y-%m-%d" (ngày) và "%Y-%m-%d %H:%M" (ngày giờ phút)
-    if isinstance(start, str):
-        try:
-            start = datetime.strptime(start, "%Y-%m-%d %H:%M")
-        except ValueError:
-            start = datetime.strptime(start, "%Y-%m-%d")
-    
-    if isinstance(end, str):
-        try:
-            end = datetime.strptime(end, "%Y-%m-%d %H:%M")
-        except ValueError:
-            end = datetime.strptime(end, "%Y-%m-%d")
+        return records
 
-    # =====================================================
-    # Load 1 file duy nhất và update history FLAT JSON
-    # =====================================================
-
-    # Load file cũ (nếu có)
-    # ---- load old data ----
-    if os.path.exists(json_file):
-        with open(json_file, "r", encoding="utf-8") as f:
-            all_records = json.load(f)
-    else:
-        all_records = []
-
-    df_all = pd.DataFrame(all_records) if all_records else pd.DataFrame(
-        columns=["ticker", "company", "time"]
-    )
-
-    updated_records = []
-
-    for ticker in tickers:
-        print(f"\n=== {ticker} ===")
+    def crawl_ticker(
+        self,
+        ticker: str,
+        start=None,
+        end=None
+    ) -> List[Dict]:
+        """
+        Crawl 1 mã cổ phiếu
+        """
+        start = self._parse_datetime(start)
+        end = self._parse_datetime(end)
 
         tk = yf.Ticker(ticker)
         company = tk.info.get("longName")
 
-        df_old = df_all[df_all["ticker"] == ticker]
-
-        # ---- download data ----
-        new_df = yf.download(
+        df = yf.download(
             ticker,
-            interval=interval,
+            interval=self.interval,
             start=start,
             end=end,
             auto_adjust=False,
             progress=False
         )
 
-        if new_df.empty:
-            print(f"[{ticker}] No new data")
-            if not df_old.empty:
-                updated_records.extend(df_old.to_dict(orient="records"))
-            continue
+        if df.empty:
+            return []
 
-        new_records = df_to_flat_json(new_df, ticker, company)
+        df = self._normalize_df(df)
+        return self._df_to_flat_records(df, ticker, company)
 
-        if not df_old.empty:
-            updated_records.extend(df_old.to_dict(orient="records"))
+    def crawl_many(
+        self,
+        tickers: Iterable[str],
+        start=None,
+        end=None
+    ) -> List[Dict]:
+        """
+        Crawl nhiều mã – trả về list records
+        """
+        all_records = []
 
-        updated_records.extend(new_records)
+        for ticker in tickers:
+            print(f"[CRAWL] {ticker}")
+            records = self.crawl_ticker(ticker, start, end)
+            all_records.extend(records)
 
-    # ---- sort & save ----
-        # ---- deduplicate, sort & save ----
-    # Loại bỏ bản ghi trùng theo khóa (ticker, time). Giữ bản ghi mới nhất nếu có trùng.
-    if updated_records:
-        df_updated = pd.DataFrame(updated_records)
-        df_updated = df_updated.drop_duplicates(subset=["ticker", "time"], keep="last")
-        updated_records = df_updated.sort_values(by=["ticker", "time"]).to_dict(orient="records")
-    else:
-        updated_records = []
+        return all_records
 
-    with open(json_file, "w", encoding="utf-8") as f:
-        json.dump(updated_records, f, indent=4, ensure_ascii=False)
-
-    print("\nĐÃ LƯU HISTORY THEO KHOẢNG NGÀY + GIỜ")
-    return updated_records
-
-if __name__ == "__main__":
-    # Ví dụ: Lưu theo ngày
-    save_all_flat_history(
-        tickers=["AAPL", "NVDA"], 
-        json_file="history.json",
-        interval="15m",    #1d, 1h, 1m tuy chon     
-        start="2026-01-05",    
-        end="2026-01-10"
-    )
-    #1m	~7 ngày gần nhất
-    #5m–60m	~60 ngày gần nhất
-    #1d	Không giới hạn
+    def crawl_many_stream(
+        self,
+        tickers: Iterable[str],
+        start=None,
+        end=None
+    ):
+        """
+        Generator version – dùng cho Kafka streaming
+        """
+        for ticker in tickers:
+            print(f"[CRAWL-STREAM] {ticker}")
+            for record in self.crawl_ticker(ticker, start, end):
+                yield record
