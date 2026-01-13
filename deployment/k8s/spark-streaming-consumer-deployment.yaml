@@ -1,0 +1,81 @@
+---
+# Deployment: Spark Streaming Consumer (Real-time Processing)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-streaming-consumer
+  namespace: bigdata
+  labels:
+    app: spark-streaming
+    component: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-streaming
+  template:
+    metadata:
+      labels:
+        app: spark-streaming
+        component: consumer
+    spec:
+      containers:
+      - name: spark-streaming
+        image: gcr.io/PROJECT_ID/bigdata-spark:latest
+        imagePullPolicy: Always
+        command:
+        - /opt/spark/bin/spark-submit
+        - --master
+        - local[*]
+        - --conf
+        - spark.sql.shuffle.partitions=4
+        - --conf
+        - spark.sql.streaming.minBatchesToRetain=2
+        - --conf
+        - spark.streaming.stopGracefullyOnShutdown=true
+        - --packages
+        - org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+        - /app/src/streaming/spark_streaming_simple.py
+        env:
+        - name: KAFKA_BROKER
+          value: "kafka:9092"
+        - name: KAFKA_TOPIC
+          value: "stocks-realtime-spark"
+        - name: ES_NODES
+          value: "elasticsearch"
+        - name: ES_PORT
+          value: "9200"
+        - name: ES_INDEX
+          value: "stock-realtime-1m"
+        - name: CHECKPOINT_LOCATION
+          value: "/tmp/spark-checkpoints/stock-realtime-1m"
+        volumeMounts:
+        - name: checkpoint
+          mountPath: /tmp/spark-checkpoints
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - spark-submit
+          initialDelaySeconds: 180
+          periodSeconds: 60
+        readinessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - spark-submit
+          initialDelaySeconds: 120
+          periodSeconds: 30
+      volumes:
+      - name: checkpoint
+        emptyDir: {}
+      restartPolicy: Always

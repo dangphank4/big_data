@@ -1,0 +1,28 @@
+---
+# ConfigMap: Global configuration for all services
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bigdata-config
+  namespace: bigdata
+data:
+  # Kafka Configuration (Single Topic)
+  KAFKA_BROKER: "kafka:9092"
+  KAFKA_TOPIC: "stocks-realtime"
+  CRAWL_INTERVAL: "60"  # 1 minute for real-time crawling
+  TICKERS: "AAPL,NVDA,TSLA,MSFT,GOOGL"
+  
+  # HDFS Configuration
+  HDFS_HOST: "hdfs-namenode"
+  HDFS_PORT: "9870"
+  HDFS_BASE_PATH: "/stock-data"
+  
+  # Elasticsearch Configuration
+  ELASTICSEARCH_HOST: "elasticsearch"
+  ELASTICSEARCH_PORT: "9200"
+  
+  # Spark Streaming Configuration
+  CHECKPOINT_DIR: "/tmp/spark-checkpoint"
+  
+  # HDFS Archiver Configuration
+  LOOKBACK_HOURS: "24"  # Archive last 24 hours daily

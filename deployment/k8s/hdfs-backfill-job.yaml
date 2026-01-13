@@ -1,0 +1,42 @@
+---
+# One-time Job: Backfill historical data directly into HDFS (/stock-data)
+# Use this when batch jobs need long history beyond the HDFS archiver lookback window.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hdfs-historical-backfill
+  namespace: bigdata
+  labels:
+    app: hdfs-historical-backfill
+    component: batch
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: hdfs-historical-backfill
+        component: batch
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: backfill
+        image: gcr.io/PROJECT_ID/bigdata-app:latest
+        imagePullPolicy: Always
+        command:
+          - python
+          - -m
+          - src.utils.crawl_feed
+          - --tickers
+          - AAPL,NVDA,TSLA,MSFT,GOOGL
+          - --days
+          - "3650"
+          - --interval
+          - 1d
+        env:
+          # WebHDFS endpoint (HTTP)
+          - name: HDFS_HOST
+            value: hdfs-namenode
+          - name: HDFS_PORT
+            value: "9870"
+          - name: HDFS_BASE_PATH
+            value: /stock-data

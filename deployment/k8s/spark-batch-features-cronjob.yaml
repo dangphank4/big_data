@@ -1,0 +1,57 @@
+---
+# CronJob: Spark Batch Features -> HDFS + Elasticsearch
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: spark-batch-features
+  namespace: bigdata
+  labels:
+    app: spark-batch-features
+    component: batch
+spec:
+  schedule: "15 0 * * *"  # daily 00:15 UTC (after HDFS archiver)
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: spark-batch-features
+            component: batch
+        spec:
+          containers:
+          - name: spark-batch-features
+            image: gcr.io/PROJECT_ID/bigdata-spark:latest
+            imagePullPolicy: Always
+            command:
+            - /opt/spark/bin/spark-submit
+            - --master
+            - local[*]
+            - --conf
+            - spark.sql.shuffle.partitions=4
+            - --packages
+            - org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+            - /app/src/batch_jobs/run_all.py
+            env:
+            - name: HDFS_INPUT_PATH
+              value: "hdfs://hdfs-namenode:9000/stock-data"
+            - name: HDFS_OUTPUT_PATH
+              value: "hdfs://hdfs-namenode:9000/tmp/serving/batch_features"
+            - name: ES_NODES
+              value: "elasticsearch"
+            - name: ES_PORT
+              value: "9200"
+            - name: ES_INDEX_BATCH
+              value: "batch-features"
+            resources:
+              requests:
+                memory: "2Gi"
+                cpu: "1000m"
+              limits:
+                memory: "4Gi"
+                cpu: "2000m"
+          restartPolicy: OnFailure
+

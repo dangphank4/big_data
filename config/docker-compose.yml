@@ -1,0 +1,322 @@
+services:
+  # ======================
+  # ZOOKEEPER
+  # ======================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.1   
+    container_name: zookeeper
+    networks:
+      - bigdata-network
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  # ======================
+  # KAFKA
+  # ======================
+  kafka:
+    image: confluentinc/cp-kafka:7.9.1    
+    container_name: kafka
+    networks:
+      - bigdata-network
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # Retention and compaction for streaming/batch topics
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_CLEANER_ENABLE: "true"
+      KAFKA_LOG_RETENTION_BYTES: -1
+      KAFKA_MESSAGE_MAX_BYTES: 2000000
+      # Allow broker to auto-create topics on first access (dev-friendly).
+      # Note: topic creation is still asynchronous; use healthchecks/ordering to reduce races.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "kafka-topics --bootstrap-server localhost:9092 --create --if-not-exists --topic stocks-realtime --replication-factor 1 --partitions 1 >/dev/null 2>&1 && kafka-topics --bootstrap-server localhost:9092 --create --if-not-exists --topic stocks-realtime-spark --replication-factor 1 --partitions 1 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ======================
+  # HDFS (Hadoop)
+  # ======================
+  hadoop-namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-namenode
+    environment:
+      CLUSTER_NAME: test
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:9000
+    ports:
+      - "9870:9870"  # UI NameNode
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/9870"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - hdfs-namenode:/hadoop/dfs/name
+    networks:
+      - bigdata-network
+  hadoop-datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-datanode
+    depends_on:
+      - hadoop-namenode
+    environment:
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:9000
+      NAMENODE_HOST: hadoop-namenode
+      SERVICE_PRECONDITION: "hadoop-namenode:9000"
+    ports:
+      - "9864:9864"  # UI DataNode
+    volumes:
+      - hdfs-datanode:/hadoop/dfs/data
+    networks:
+      - bigdata-network
+
+  # ======================
+  # ELASTICSEARCH
+  # ======================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.16
+    container_name: elasticsearch
+    networks:
+      - bigdata-network
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"  # REST API
+      - "9300:9300"  # Cluster internal communication
+
+  # ======================
+  # KIBANA
+  # ======================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.16
+    container_name: kibana
+    networks:
+      - bigdata-network
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENABLED=false
+    ports:
+      - "5601:5601"  # UI Kibana
+
+  stock-producer:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile
+    container_name: stock-producer
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["python", "-m", "src.producers.kafka_producer"]
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stocks-realtime
+    restart: unless-stopped
+
+  hdfs-archiver:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile
+    container_name: hdfs-archiver
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      hadoop-namenode:
+        condition: service_healthy
+    command: ["python", "-m", "src.consumers.kafka_consumer_hdfs_archiver"]
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stocks-realtime
+      - KAFKA_GROUP_ID=hdfs-archiver
+      - HDFS_HOST=hadoop-namenode
+      - HDFS_PORT=9870
+      - HDFS_BASE_PATH=/stock-data
+      - LOOKBACK_HOURS=24
+    restart: unless-stopped
+
+  # ======================
+  # KAFKA BRIDGE -> SPARK INPUT TOPIC
+  # ======================
+  spark-kafka-bridge:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile
+    container_name: spark-kafka-bridge
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["python", "-m", "src.consumers.kafka_consumer_spark_streaming"]
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - INPUT_TOPIC=stocks-realtime
+      - SPARK_TOPIC=stocks-realtime-spark
+      - KAFKA_GROUP_ID=spark-bridge
+      - AUTO_OFFSET_RESET=latest
+    restart: unless-stopped
+
+  python-worker:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile
+    container_name: python-worker
+    networks:
+      - bigdata-network
+    volumes:
+      - ./:/app
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["sleep", "infinity"]
+
+
+  # ======================
+  # SPARK STREAMING - REALTIME STOCK METRICS (Kibana index: stock-realtime-1m)
+  # ======================
+  spark-streaming-metrics:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.spark
+    container_name: spark-streaming-metrics
+    user: root
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+      hadoop-namenode:
+        condition: service_healthy
+    volumes:
+      # Code is already in image from COPY in Dockerfile.spark
+      # - ./:/app
+      - ./logs:/logs
+      - spark-ivy-cache:/home/spark/.ivy2
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[*]
+      --conf spark.sql.shuffle.partitions=4
+      --conf spark.sql.streaming.minBatchesToRetain=2
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+      /app/src/streaming/spark_streaming_simple.py
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stocks-realtime-spark
+      - ES_NODES=elasticsearch
+      - ES_PORT=9200
+      - ES_INDEX=stock-realtime-1m
+      # Bump suffix (e.g., _v2) if you change streaming aggregation/schema to avoid checkpoint state incompatibility.
+      - CHECKPOINT_LOCATION=/tmp/spark-checkpoints/stock-realtime-1m_v1
+    restart: on-failure
+
+  # ======================
+  # SPARK STREAMING - 1M ALERTS (Kibana index: stock-alerts-1m)
+  # ======================
+  spark-streaming-alerts:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.spark
+    container_name: spark-streaming-alerts
+    user: root
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+    volumes:
+      # Code is already in image from COPY in Dockerfile.spark
+      # - ./:/app
+      - ./logs:/logs
+      - spark-ivy-cache:/home/spark/.ivy2
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[*]
+      --conf spark.sql.shuffle.partitions=4
+      --conf spark.sql.streaming.minBatchesToRetain=2
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+      /app/src/streaming/spark_streaming_alert.py
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=stocks-realtime-spark
+      - ES_NODES=elasticsearch
+      - ES_PORT=9200
+      - ES_ALERT_INDEX=stock-alerts-1m
+      - ALERT_RETURN_PCT_THRESHOLD=0.01
+      - ALERT_RANGE_PCT_THRESHOLD=0.015
+      - CHECKPOINT_LOCATION=/tmp/spark-checkpoints/stock-alerts-1m_v1
+    restart: on-failure
+
+  # ======================
+  # SPARK BATCH - FEATURE COMPUTATION -> ES + HDFS
+  # ======================
+  spark-batch-features:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.spark
+    container_name: spark-batch-features
+    user: root
+    networks:
+      - bigdata-network
+    depends_on:
+      elasticsearch:
+        condition: service_started
+      hadoop-namenode:
+        condition: service_healthy
+    volumes:
+      # Code is already in image from COPY in Dockerfile.spark
+      # - ./:/app
+      - spark-ivy-cache:/home/spark/.ivy2
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[*]
+      --conf spark.sql.shuffle.partitions=4
+      --packages org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+      /app/src/batch_jobs/run_all.py
+    environment:
+      - HDFS_INPUT_PATH=hdfs://hadoop-namenode:9000/stock-data
+      - HDFS_OUTPUT_PATH=hdfs://hadoop-namenode:9000/tmp/serving/batch_features
+      - ES_NODES=elasticsearch
+      - ES_PORT=9200
+      - ES_INDEX_BATCH=batch-features
+    restart: "no"
+
+
+# ======================
+# VOLUMES
+# ======================
+volumes:
+  hdfs-namenode:
+  hdfs-datanode:
+  spark-ivy-cache:
+
+networks:
+  bigdata-network:
+    driver: bridge

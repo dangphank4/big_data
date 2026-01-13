@@ -1,0 +1,59 @@
+---
+# Deployment: Kafka Producer (Real-time Crawling)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-producer-crawl
+  namespace: bigdata
+  labels:
+    app: kafka-producer
+    component: producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-producer
+  template:
+    metadata:
+      labels:
+        app: kafka-producer
+        component: producer
+    spec:
+      containers:
+      - name: kafka-producer
+        image: gcr.io/PROJECT_ID/bigdata-app:latest
+        imagePullPolicy: Always
+        command: ["python", "-m", "src.producers.kafka_producer"]
+        env:
+        - name: KAFKA_BROKER
+          value: "kafka:9092"
+        - name: KAFKA_TOPIC
+          value: "stocks-realtime"
+        - name: CRAWL_INTERVAL
+          value: "60"  # 1 minute
+        - name: TICKERS
+          value: "AAPL,NVDA,TSLA,MSFT,GOOGL"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 60
+          periodSeconds: 60
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+      restartPolicy: Always

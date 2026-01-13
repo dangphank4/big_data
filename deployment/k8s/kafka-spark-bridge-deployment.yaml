@@ -1,0 +1,46 @@
+---
+# Deployment: Kafka -> Spark bridge
+# Consumes raw producer events and republishes to a Spark-consumed topic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-spark-bridge
+  namespace: bigdata
+  labels:
+    app: kafka-spark-bridge
+    component: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-spark-bridge
+  template:
+    metadata:
+      labels:
+        app: kafka-spark-bridge
+        component: consumer
+    spec:
+      containers:
+      - name: kafka-spark-bridge
+        image: gcr.io/PROJECT_ID/bigdata-app:latest
+        imagePullPolicy: Always
+        command: ["python", "-m", "src.consumers.kafka_consumer_spark_streaming"]
+        env:
+        - name: KAFKA_BROKER
+          value: "kafka:9092"
+        - name: INPUT_TOPIC
+          value: "stocks-realtime"
+        - name: SPARK_TOPIC
+          value: "stocks-realtime-spark"
+        - name: KAFKA_GROUP_ID
+          value: "spark-bridge"
+        - name: AUTO_OFFSET_RESET
+          value: "latest"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      restartPolicy: Always

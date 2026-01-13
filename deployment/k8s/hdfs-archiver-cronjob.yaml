@@ -1,0 +1,52 @@
+---
+# CronJob: HDFS Archiver (Batch Mode - Daily at 00:00)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hdfs-archiver
+  namespace: bigdata
+  labels:
+    app: hdfs-archiver
+    component: consumer
+spec:
+  schedule: "0 0 * * *"  # Daily at midnight UTC
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: hdfs-archiver
+            component: consumer
+        spec:
+          containers:
+          - name: hdfs-archiver
+            image: gcr.io/PROJECT_ID/bigdata-app:latest
+            imagePullPolicy: Always
+            command: ["python", "-m", "src.consumers.kafka_consumer_hdfs_archiver"]
+            env:
+            - name: KAFKA_BROKER
+              value: "kafka:9092"
+            - name: KAFKA_TOPIC
+              value: "stocks-realtime"
+            - name: KAFKA_GROUP_ID
+              value: "hdfs-archiver"
+            - name: HDFS_HOST
+              value: "hdfs-namenode"
+            - name: HDFS_PORT
+              value: "9870"
+            - name: HDFS_BASE_PATH
+              value: "/stock-data"
+            - name: LOOKBACK_HOURS
+              value: "24"  # Archive last 24 hours
+            resources:
+              requests:
+                memory: "1Gi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+          restartPolicy: OnFailure

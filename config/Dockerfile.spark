@@ -1,0 +1,19 @@
+FROM apache/spark:3.4.3
+
+USER root
+WORKDIR /app
+
+# Python deps for batch_jobs and any helper libraries (ES client not required for Spark connector,
+# but kept for parity with other components).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/requirements.txt
+RUN python3 -m pip install --no-cache-dir --upgrade pip && \
+    python3 -m pip install --no-cache-dir -r /app/requirements.txt
+
+COPY src/ /app/src/
+ENV PYTHONPATH=/app

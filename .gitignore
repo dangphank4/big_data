@@ -3,3 +3,4 @@ __pycache__/
 output/
 *.log
 .vscode
+google-cloud-sdk/

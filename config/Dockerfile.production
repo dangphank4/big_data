@@ -1,0 +1,48 @@
+# Dockerfile - Production version for BigData Stock Analysis
+
+# Use official Python slim image
+FROM python:3.12-slim
+
+# Metadata
+LABEL maintainer="bigdata-team@example.com"
+LABEL version="2.0.0"
+LABEL description="BigData Stock Analysis - Real-time Crawling & Streaming"
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy dependency manifest first for better layer caching
+COPY requirements.txt /app/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy application code
+COPY src/ /app/src/
+COPY requirements.txt /app/
+
+# Create directories
+RUN mkdir -p /app/logs
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
+
+# Default command: Keep container running
+CMD ["tail", "-f", "/dev/null"]
