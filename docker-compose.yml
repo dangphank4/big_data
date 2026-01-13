@@ -129,6 +129,25 @@ services:
       - KAFKA_TOPIC=stocks-history
     restart: unless-stopped
 
+  stream-producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stream-producer
+    networks:
+      - bigdata-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: python kafka_stream_producer.py
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_STREAM_TOPIC=stream_topic
+      - INTERVAL=1m
+      - CRAWL_INTERVAL_SEC=60
+      - TICKERS=AAPL,NVDA,GOOGL
+    restart: unless-stopped
+
   kafka-consumer:
     build:
       context: .
