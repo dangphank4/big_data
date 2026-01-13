@@ -19,7 +19,7 @@ def main():
 
     print("=== [1] ĐANG LẬP KẾ HOẠCH ĐỌC DỮ LIỆU ===")
     # Đọc history.json. Spark chưa đọc ngay, nó chỉ kiểm tra cấu trúc file (Lazy Evaluation)
-    df = spark.read.json("history.json", multiLine=True)
+    df_batch = spark.read.json("hdfs://hadoop-namenode:9000/tmp/serving/batch_features")
 
     # Chuẩn hóa cột thời gian và ép kiểu (Spark tự tối ưu hóa kiểu số)
     if "time" in df.columns:
