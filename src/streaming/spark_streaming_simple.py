@@ -113,12 +113,11 @@ def run_streaming():
         stddev("Close").alias("price_volatility")
     )
     
-    # Format output - Keep timestamps as TimestampType for Elasticsearch
-    # Elasticsearch connector will automatically handle Spark TimestampType -> ES date
+    # Format output - Keep as TimestampType, index template will map to date
     output_df = windowed_df.select(
         col("window.start").alias("window_start"),
         col("window.end").alias("window_end"),
-        col("window.start").alias("@timestamp"),  # Kibana time field - keep as timestamp
+        col("window.start").alias("@timestamp"),  # Kibana time field
         col("ticker"),
         col("company"),
         col("avg_price"),
