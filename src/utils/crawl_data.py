@@ -67,30 +67,47 @@ class CrawlData:
         self,
         ticker: str,
         start=None,
-        end=None
+        end=None,
+        latest_only: bool = False
     ) -> List[Dict]:
         """
         Crawl 1 mã cổ phiếu
+        - interval=1m → dùng period=1d
+        - latest_only=True → chỉ lấy candle mới nhất (Kafka)
         """
-        start = self._parse_datetime(start)
-        end = self._parse_datetime(end)
 
         tk = yf.Ticker(ticker)
         company = tk.info.get("longName")
 
-        df = yf.download(
-            ticker,
-            interval=self.interval,
-            start=start,
-            end=end,
-            auto_adjust=False,
-            progress=False
-        )
+        if self.interval == "1m":
+            df = yf.download(
+                ticker,
+                interval="1m",
+                period="1d",
+                auto_adjust=False,
+                progress=False
+            )
+        else:
+            start = self._parse_datetime(start)
+            end = self._parse_datetime(end)
+
+            df = yf.download(
+                ticker,
+                interval=self.interval,
+                start=start,
+                end=end,
+                auto_adjust=False,
+                progress=False
+            )
 
         if df.empty:
             return []
 
         df = self._normalize_df(df)
+
+        if latest_only:
+            df = df.tail(1)
+
         return self._df_to_flat_records(df, ticker, company)
 
     def crawl_many(

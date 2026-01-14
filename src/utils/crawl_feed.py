@@ -186,8 +186,8 @@ Examples:
     parser.add_argument(
         '--tickers',
         type=str,
-        default='AAPL,NVDA,TSLA,MSFT,GOOGL',
-        help='Comma-separated ticker symbols (default: AAPL,NVDA,TSLA,MSFT,GOOGL)'
+        default='AAPL,NVDA',
+        help='Comma-separated ticker symbols (default: AAPL,NVDA)'
     )
     
     parser.add_argument(

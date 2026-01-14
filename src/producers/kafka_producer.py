@@ -18,7 +18,7 @@ from ..utils.crawl_data import CrawlData
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "stocks-realtime")
 CRAWL_INTERVAL = int(os.getenv("CRAWL_INTERVAL", "60"))  # seconds (1 minute)
-TICKERS = os.getenv("TICKERS", "AAPL,NVDA,TSLA,MSFT,GOOGL").split(",")
+TICKERS = os.getenv("TICKERS", "AAPL,NVDA").split(",")
 
 # Unbuffered output for Docker
 sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
@@ -61,18 +61,13 @@ class StockProducerCrawl:
                 batch_count += 1
                 start_time = datetime.now()
                 
-                # Calculate time range for last minute
-                end = datetime.now()
-                start = end - timedelta(minutes=2)  # Get last 2 minutes to ensure data
-                
                 records_sent = 0
                 for ticker in TICKERS:
                     try:
                         # Crawl minute data
                         records = self.crawler.crawl_ticker(
                             ticker=ticker,
-                            start=start.strftime("%Y-%m-%d %H:%M"),
-                            end=end.strftime("%Y-%m-%d %H:%M")
+                            latest_only=True
                         )
                         
                         # Send to Kafka
