@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     from_json, col, window, avg, min, max, sum, count,
-    stddev, current_timestamp, to_timestamp
+    stddev, current_timestamp, to_timestamp, date_format
 )
 
 # Import unified schema from standardization module
@@ -113,11 +113,11 @@ def run_streaming():
         stddev("Close").alias("price_volatility")
     )
     
-    # Format output - Keep as TimestampType, index template will map to date
+    # Format output - Convert timestamps to ISO string for ES date mapping
     output_df = windowed_df.select(
-        col("window.start").alias("window_start"),
-        col("window.end").alias("window_end"),
-        col("window.start").alias("@timestamp"),  # Kibana time field
+        date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_start"),
+        date_format(col("window.end"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_end"),
+        date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("@timestamp"),  # Kibana time field
         col("ticker"),
         col("company"),
         col("avg_price"),
@@ -126,7 +126,7 @@ def run_streaming():
         col("total_volume"),
         col("trade_count"),
         col("price_volatility"),
-        current_timestamp().alias("processed_time")
+        date_format(current_timestamp(), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("processed_time")
     )
     
     # Start streaming with retry to avoid cold-start races (topic not created yet)

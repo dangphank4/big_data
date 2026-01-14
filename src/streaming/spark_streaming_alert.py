@@ -97,8 +97,8 @@ def main():
         )
         .select(
             col("ticker"),
-            col("window.start").alias("window_start"),
-            col("window.end").alias("window_end"),
+            F.date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_start"),
+            F.date_format(col("window.end"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_end"),
             col("open_struct.open").alias("open_1m"),
             col("close_struct.close").alias("close_1m"),
             col("high_1m"),
