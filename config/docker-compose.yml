@@ -241,50 +241,50 @@ services:
   # ======================
   # SPARK STREAMING - 1M ALERTS (Kibana index: stock-alerts-1m)
   # ======================
-  spark-streaming-alerts:
-    build:
-      context: ..
-      dockerfile: config/Dockerfile.spark
-    container_name: spark-streaming-alerts
-    user: root
-    networks:
-      - bigdata-network
-    depends_on:
-      kafka:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_started
-    volumes:
-      # Code is already in image from COPY in Dockerfile.spark
-      # - ./:/app
-      - ./logs:/logs
-      - spark-ivy-cache:/home/spark/.ivy2
-    command: >
-      /opt/spark/bin/spark-submit
-      --master local[*]
-      --conf spark.sql.shuffle.partitions=4
-      --conf spark.sql.streaming.minBatchesToRetain=2
-      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
-      /app/src/streaming/spark_streaming_alert.py
-    environment:
-      - KAFKA_BROKER=kafka:9092
-      - KAFKA_TOPIC=stocks-realtime-spark
-      - ES_NODES=elasticsearch
-      - ES_PORT=9200
-      - ES_ALERT_INDEX=stock-alerts-1m
-      - ALERT_RETURN_PCT_THRESHOLD=0.01
-      - ALERT_RANGE_PCT_THRESHOLD=0.015
-      - CHECKPOINT_LOCATION=/tmp/spark-checkpoints/stock-alerts-1m_v1
-    restart: on-failure
+  # spark-streaming-alerts:
+  #   build:
+  #     context: ..
+  #     dockerfile: config/Dockerfile.spark
+  #   container_name: spark-streaming-alerts
+  #   user: root
+  #   networks:
+  #     - bigdata-network
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #     elasticsearch:
+  #       condition: service_started
+  #   volumes:
+  #     # Code is already in image from COPY in Dockerfile.spark
+  #     # - ./:/app
+  #     - ./logs:/logs
+  #     - spark-ivy-cache:/home/spark/.ivy2
+  #   command: >
+  #     /opt/spark/bin/spark-submit
+  #     --master local[*]
+  #     --conf spark.sql.shuffle.partitions=4
+  #     --conf spark.sql.streaming.minBatchesToRetain=2
+  #     --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
+  #     /app/src/streaming/spark_streaming_alert.py
+  #   environment:
+  #     - KAFKA_BROKER=kafka:9092
+  #     - KAFKA_TOPIC=stocks-realtime-spark
+  #     - ES_NODES=elasticsearch
+  #     - ES_PORT=9200
+  #     - ES_ALERT_INDEX=stock-alerts-1m
+  #     - ALERT_RETURN_PCT_THRESHOLD=0.01
+  #     - ALERT_RANGE_PCT_THRESHOLD=0.015
+  #     - CHECKPOINT_LOCATION=/tmp/spark-checkpoints/stock-alerts-1m_v1
+  #   restart: on-failure
 
-  # ======================
-  # SPARK BATCH - FEATURE COMPUTATION -> ES + HDFS
-  # ======================
-  spark-batch-features:
+  # # ======================
+  # # SPARK BATCH - FEATURE COMPUTATION -> ES + HDFS
+  # # ======================
+  spark-batch-features-cron:
     build:
       context: ..
       dockerfile: config/Dockerfile.spark
-    container_name: spark-batch-features
+    container_name: spark-batch-features-cron
     user: root
     networks:
       - bigdata-network
@@ -293,24 +293,16 @@ services:
         condition: service_started
       hadoop-namenode:
         condition: service_healthy
-    volumes:
-      # Code is already in image from COPY in Dockerfile.spark
-      # - ./:/app
-      - spark-ivy-cache:/home/spark/.ivy2
-    command: >
-      /opt/spark/bin/spark-submit
-      --master local[*]
-      --conf spark.sql.shuffle.partitions=4
-      --packages org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
-      /app/src/batch_jobs/run_all.py
     environment:
       - HDFS_INPUT_PATH=hdfs://hadoop-namenode:9000/stock-data
-      - HDFS_OUTPUT_PATH=hdfs://hadoop-namenode:9000/tmp/serving/batch_features
       - ES_NODES=elasticsearch
       - ES_PORT=9200
       - ES_INDEX_BATCH=batch-features
-    restart: "no"
-
+    command: >
+      sh -c 'echo "* * * * * export JAVA_HOME=/opt/java/openjdk; export PATH=$$PATH:$$JAVA_HOME/bin; /opt/spark/bin/spark-submit --master local[*] --packages org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16 /app/src/batch_jobs/run_all.py >> /var/log/cron.log 2>&1" > /etc/cron.d/spark-cron &&
+      chmod 0644 /etc/cron.d/spark-cron &&
+      crontab /etc/cron.d/spark-cron &&
+      cron && tail -f /dev/null'
 
 # ======================
 # VOLUMES

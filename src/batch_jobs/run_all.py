@@ -99,7 +99,7 @@ def main():
         .format("org.elasticsearch.spark.sql")
         .option("es.nodes", ES_NODES)
         .option("es.port", ES_PORT)
-        .option("es.resource", f"{ES_INDEX_BATCH}/doc")
+        .option("es.resource", f"{ES_INDEX_BATCH}/_doc")
         .option("es.mapping.id", "doc_id")
         .option("es.write.operation", "index")
         .mode("append")

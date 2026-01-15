@@ -915,7 +915,7 @@ Sau khi đã có dữ liệu trong HDFS, chạy batch job để tính toán feat
 
 ```bash
 # Run batch features computation
-docker compose -f config/docker-compose.yml run --rm spark-batch-features
+docker compose -f config/docker-compose.yml run --rm spark-batch-features-cron
 ```
 
 **Expected output:**
@@ -979,6 +979,7 @@ Sample document sẽ có các features:
 Nếu muốn batch features tự động chạy định kỳ (vd: mỗi ngày 1 lần), start batch cronjob:
 
 ```bash
+docker compose -f config/docker-compose.yml up -d elasticsearch hadoop-namenode kibana
 docker compose -f config/docker-compose.yml up -d spark-batch-features-cron
 ```
 
