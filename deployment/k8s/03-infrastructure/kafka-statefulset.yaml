@@ -23,6 +23,8 @@ spec:
         - containerPort: 9092
           name: kafka
         env:
+        - name: KAFKA_HEAP_OPTS        
+          value: "-Xmx400M -Xms400M"     # (Giảm xuống 400MB)
         - name: KAFKA_BROKER_ID
           value: "1"
         - name: KAFKA_ZOOKEEPER_CONNECT
@@ -63,7 +65,7 @@ spec:
         readinessProbe:
           tcpSocket:
             port: 9092
-          initialDelaySeconds: 30
+          initialDelaySeconds: 60
           periodSeconds: 5
       volumes:
       - name: kafka-storage
