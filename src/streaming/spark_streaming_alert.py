@@ -15,7 +15,7 @@ import os
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.functions import from_json, col, window
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, LongType
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 
 
 # ============================================================================
@@ -46,7 +46,7 @@ SCHEMA = StructType([
     StructField("Low", DoubleType(), True),
     StructField("Close", DoubleType(), True),
     StructField("Adj Close", DoubleType(), True),
-    StructField("Volume", LongType(), True),
+    StructField("Volume", DoubleType(), True),
 ])
 
 
@@ -79,7 +79,15 @@ def main():
     df = (
         df_raw.select(from_json(col("value").cast("string"), SCHEMA).alias("data"))
         .select("data.*")
-        .withColumn("timestamp", F.to_timestamp("time"))
+        .withColumn(
+            "source_time",
+            F.coalesce(
+                F.to_timestamp("time", "yyyy-MM-dd HH:mm:ssXXX"),
+                F.to_timestamp("time"),
+            ),
+        )
+        # Use processing time for windowing so append mode can emit regularly.
+        .withColumn("timestamp", F.current_timestamp())
         .where(F.col("ticker").isNotNull() & F.col("timestamp").isNotNull())
     )
 
@@ -94,16 +102,19 @@ def main():
             F.max(col("High")).alias("high_1m"),
             F.min(col("Low")).alias("low_1m"),
             F.sum(col("Volume")).alias("volume_sum_1m"),
+            F.max(col("source_time")).alias("source_time"),
         )
         .select(
             col("ticker"),
-            F.date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_start"),
-            F.date_format(col("window.end"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_end"),
+            col("window.start").alias("@timestamp"),  # Keep as TIMESTAMP type for Kibana
+            col("window.start").alias("window_start"),  # Keep as timestamp type
+            col("window.end").alias("window_end"),      # Keep as timestamp type
             col("open_struct.open").alias("open_1m"),
             col("close_struct.close").alias("close_1m"),
             col("high_1m"),
             col("low_1m"),
             col("volume_sum_1m"),
+            col("source_time"),
         )
         .withColumn(
             "return_pct_1m",
@@ -150,7 +161,7 @@ def main():
         .format("org.elasticsearch.spark.sql")
         .option("es.nodes", ES_NODES)
         .option("es.port", ES_PORT)
-        .option("es.resource", f"{ES_ALERT_INDEX}/doc")
+        .option("es.resource", f"{ES_ALERT_INDEX}/_doc")
         .option("es.mapping.id", "doc_id")
         .option("es.write.operation", "index")
         .option("checkpointLocation", f"{CHECKPOINT_LOCATION}/alerts")

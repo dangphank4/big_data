@@ -10,7 +10,7 @@ data:
   KAFKA_BROKER: "kafka:9092"
   KAFKA_TOPIC: "stocks-realtime"
   CRAWL_INTERVAL: "60"  # 1 minute for real-time crawling
-  TICKERS: "AAPL,NVDA,TSLA,MSFT,GOOGL"
+  TICKERS: "AAPL,NVDA"
   
   # HDFS Configuration
   HDFS_HOST: "hdfs-namenode"

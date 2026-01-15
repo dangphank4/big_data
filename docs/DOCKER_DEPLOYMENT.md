@@ -796,7 +796,6 @@ curl -X GET "http://localhost:9200/stock-realtime-1m/_count"
 
 ---
 
-
 ---
 
 ### Step 24: Feed Dữ Liệu Lịch Sử vào HDFS (Phục vụ Batch Features)
@@ -893,7 +892,17 @@ docker exec -it hadoop-namenode hdfs dfs -cat /stock-data/2024-01-02/AAPL.json
 **Expected output:**
 
 ```json
-{"ticker":"AAPL","company":"Apple Inc.","time":"2024-01-02T00:00:00","Open":187.15,"High":188.44,"Low":183.89,"Close":185.64,"Adj Close":184.58,"Volume":82488300}
+{
+  "ticker": "AAPL",
+  "company": "Apple Inc.",
+  "time": "2024-01-02T00:00:00",
+  "Open": 187.15,
+  "High": 188.44,
+  "Low": 183.89,
+  "Close": 185.64,
+  "Adj Close": 184.58,
+  "Volume": 82488300
+}
 ```
 
 **📸 Screenshot Checkpoint 24a**: Dữ liệu lịch sử đã được crawl vào HDFS
@@ -1115,6 +1124,143 @@ docker exec -it spark-streaming-alerts ls -la /tmp/spark-checkpoints || true
 docker compose -f config/docker-compose.yml stop spark-streaming-metrics
 docker exec -it spark-streaming-metrics rm -rf /tmp/spark-checkpoints
 docker compose -f config/docker-compose.yml start spark-streaming-metrics
+```
+
+---
+
+#### Issue 4B: Code đúng nhưng mapping type sai (Kibana không chọn được time field)
+
+**Triệu chứng**: Kibana không cho chọn `@timestamp`/`window_start` làm time field, hoặc mapping trong Elasticsearch là `long`/`text` thay vì `date`.
+
+**Nguyên nhân**: Elasticsearch đã **tự động tạo mapping** từ dữ liệu cũ (type sai), nên về sau dù code đã sửa, mapping vẫn giữ nguyên.
+
+**Cách khắc phục triệt để** (tạo template + tạo lại index):
+
+```bash
+# 1) Tạo index template với kiểu DATE
+curl -s -X PUT http://localhost:9200/_index_template/stock-realtime-template \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "index_patterns": ["stock-realtime-1m*"],
+    "template": {
+      "mappings": {
+        "properties": {
+          "@timestamp": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+          "window_start": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+          "window_end": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+          "processed_time": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+          "source_time": {"type": "date", "format": "strict_date_optional_time||epoch_millis"}
+        }
+      }
+    }
+  }'
+
+curl -s -X PUT http://localhost:9200/_index_template/stock-alerts-template \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "index_patterns": ["stock-alerts-1m*"],
+    "template": {
+      "mappings": {
+        "properties": {
+          "@timestamp": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+          "window_start": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+          "window_end": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+          "source_time": {"type": "date", "format": "strict_date_optional_time||epoch_millis"}
+        }
+      }
+    }
+  }'
+
+# 2) Xoá index cũ để mapping mới được áp dụng
+curl -s -X DELETE http://localhost:9200/stock-realtime-1m
+curl -s -X DELETE http://localhost:9200/stock-alerts-1m
+
+# 3) Chờ Spark đẩy dữ liệu mới (>= 2 phút), rồi kiểm tra mapping
+curl -s http://localhost:9200/stock-realtime-1m/_mapping?pretty
+```
+
+**Sau đó** trong Kibana:
+
+1. Vào **Stack Management → Index Patterns**
+2. **Refresh field list** hoặc tạo lại index pattern
+3. Chọn `@timestamp` làm time field
+
+**Ghi chú**: Chỉ sửa code là chưa đủ nếu index đã tồn tại với mapping sai. Bắt buộc phải xoá index (hoặc tạo index mới với suffix) để mapping mới có hiệu lực.
+
+---
+
+#### Issue 4C: Kibana Lens báo “Available fields: 0 / There are no available fields that contain data”
+
+**Triệu chứng**: Lens không thấy field nào có dữ liệu, dù index đã tạo và time field đã chọn được.
+
+**Nguyên nhân thường gặp**:
+
+- **Time range đang quá hẹp** (data bị nằm ngoài khoảng thời gian đang chọn).
+- **Index pattern chưa refresh field list** sau khi mapping đổi.
+- **Index có mapping đúng nhưng chưa có document nào** (Spark chưa đẩy đủ dữ liệu hoặc watermark chưa vượt).
+
+**Cách khắc phục**:
+
+1. **Mở rộng time range** trong Kibana (góc phải trên) → chọn **Last 24 hours** hoặc **Last 7 days**.
+
+2. **Refresh field list**:
+
+- Vào **Stack Management → Index Patterns**
+- Chọn index pattern `stock-realtime-*`
+- Click **Refresh field list**
+
+3. **Kiểm tra có dữ liệu thật trong ES**:
+
+```bash
+curl -s "http://localhost:9200/stock-realtime-1m/_count?pretty"
+curl -s "http://localhost:9200/stock-realtime-1m/_search?size=1&pretty"
+```
+
+4. **Nếu count = 0**:
+
+- Đợi ít nhất **2–3 phút** (watermark delay) rồi kiểm tra lại.
+- Xem log Spark để chắc chắn query đang chạy:
+
+```bash
+docker compose -f config/docker-compose.yml logs --tail=50 spark-streaming-metrics
+```
+
+**Ghi chú**: Với streaming có watermark, dữ liệu chỉ “append” sau khi window đóng (thường trễ vài phút). Lens sẽ không thấy field nếu chưa có document nào trong index.
+
+---
+
+#### Issue 4D: Spark ghi ES lỗi “Invalid type: expecting [_doc] but got [doc]”
+
+**Triệu chứng**: Spark streaming crash và log báo `Invalid type: expecting [_doc] but got [doc]`.
+
+**Nguyên nhân**: Elasticsearch 7.x chỉ chấp nhận type `_doc`. Nếu cấu hình `es.resource` là `{index}/doc` sẽ bị từ chối.
+
+**Cách khắc phục**:
+
+1. Sửa `es.resource` sang `/_doc` trong 2 file:
+
+- [src/streaming/spark_streaming_simple.py](src/streaming/spark_streaming_simple.py)
+- [src/streaming/spark_streaming_alert.py](src/streaming/spark_streaming_alert.py)
+
+2. Rebuild và restart các service:
+
+```bash
+docker compose -f config/docker-compose.yml build spark-streaming-metrics spark-streaming-alerts
+docker compose -f config/docker-compose.yml up -d spark-streaming-metrics spark-streaming-alerts
+```
+
+---
+
+#### Issue 4E: Lỗi curl do gõ nhầm `pretty~`
+
+**Triệu chứng**: curl trả lỗi `unrecognized parameter: [pretty~]`.
+
+**Nguyên nhân**: Gõ nhầm ký tự `~` sau `pretty`.
+
+**Cách khắc phục**: Dùng đúng cú pháp:
+
+```bash
+curl -s "http://localhost:9200/stock-realtime-1m/_search?size=1&pretty"
 ```
 
 ---

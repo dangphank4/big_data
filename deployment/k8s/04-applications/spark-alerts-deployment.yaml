@@ -1,27 +1,27 @@
 ---
-# Deployment: Spark Streaming Consumer (Real-time Processing)
+# Deployment: Spark Streaming Alerts (1-minute abnormal moves)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: spark-streaming-consumer
+  name: spark-streaming-alerts
   namespace: bigdata
   labels:
-    app: spark-streaming
+    app: spark-streaming-alerts
     component: consumer
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: spark-streaming
+      app: spark-streaming-alerts
   template:
     metadata:
       labels:
-        app: spark-streaming
+        app: spark-streaming-alerts
         component: consumer
     spec:
       containers:
-      - name: spark-streaming
-        image: gcr.io/PROJECT_ID/bigdata-spark:latest
+      - name: spark-streaming-alerts
+        image: gcr.io/inner-period-480016-h8/bigdata-spark:latest
         imagePullPolicy: Always
         command:
         - /opt/spark/bin/spark-submit
@@ -35,7 +35,7 @@ spec:
         - spark.streaming.stopGracefullyOnShutdown=true
         - --packages
         - org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.3,org.elasticsearch:elasticsearch-spark-30_2.12:7.17.16
-        - /app/src/streaming/spark_streaming_simple.py
+        - /app/src/streaming/spark_streaming_alert.py
         env:
         - name: KAFKA_BROKER
           value: "kafka:9092"
@@ -45,13 +45,17 @@ spec:
           value: "elasticsearch"
         - name: ES_PORT
           value: "9200"
-        - name: ES_INDEX
-          value: "stock-realtime-1m"
+        - name: ES_ALERT_INDEX
+          value: "stock-alerts-1m"
+        - name: ALERT_RETURN_PCT_THRESHOLD
+          value: "0.01"
+        - name: ALERT_RANGE_PCT_THRESHOLD
+          value: "0.015"
         - name: CHECKPOINT_LOCATION
-          value: "/tmp/spark-checkpoints/stock-realtime-1m"
+          value: "/tmp/spark-alerts-checkpoint"
         volumeMounts:
         - name: checkpoint
-          mountPath: /tmp/spark-checkpoints
+          mountPath: /tmp/spark-alerts-checkpoint
         resources:
           requests:
             memory: "2Gi"
@@ -59,22 +63,6 @@ spec:
           limits:
             memory: "4Gi"
             cpu: "2000m"
-        livenessProbe:
-          exec:
-            command:
-            - pgrep
-            - -f
-            - spark-submit
-          initialDelaySeconds: 180
-          periodSeconds: 60
-        readinessProbe:
-          exec:
-            command:
-            - pgrep
-            - -f
-            - spark-submit
-          initialDelaySeconds: 120
-          periodSeconds: 30
       volumes:
       - name: checkpoint
         emptyDir: {}

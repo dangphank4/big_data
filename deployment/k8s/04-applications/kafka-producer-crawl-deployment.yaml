@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: kafka-producer
-        image: gcr.io/PROJECT_ID/bigdata-app:latest
+        image: gcr.io/inner-period-480016-h8/bigdata-app:latest
         imagePullPolicy: Always
         command: ["python", "-m", "src.producers.kafka_producer"]
         env:

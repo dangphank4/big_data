@@ -24,7 +24,7 @@ spec:
         spec:
           containers:
           - name: spark-batch-features
-            image: gcr.io/PROJECT_ID/bigdata-spark:latest
+            image: gcr.io/inner-period-480016-h8/bigdata-spark:latest
             imagePullPolicy: Always
             command:
             - /opt/spark/bin/spark-submit

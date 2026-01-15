@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     from_json, col, window, avg, min, max, sum, count,
-    stddev, current_timestamp, to_timestamp, date_format
+    stddev, current_timestamp, to_timestamp, date_format, concat_ws, coalesce
 )
 
 # Import unified schema from standardization module
@@ -91,9 +91,17 @@ def run_streaming():
     ).select("data.*")
     
     # Convert time to timestamp
-    parsed_df = parsed_df.withColumn(
-        "event_time", 
-        to_timestamp(col("time"))
+    parsed_df = (
+        parsed_df
+        .withColumn(
+            "source_time",
+            coalesce(
+                to_timestamp(col("time"), "yyyy-MM-dd HH:mm:ssXXX"),
+                to_timestamp(col("time")),
+            ),
+        )
+        # Use processing time for windowing so append mode can emit regularly.
+        .withColumn("event_time", current_timestamp())
     )
     
     # Apply watermark
@@ -110,14 +118,15 @@ def run_streaming():
         max("High").alias("max_price"),
         sum("Volume").alias("total_volume"),
         count("*").alias("trade_count"),
-        stddev("Close").alias("price_volatility")
+        stddev("Close").alias("price_volatility"),
+        max("source_time").alias("source_time"),
     )
     
-    # Format output - Convert timestamps to ISO string for ES date mapping
+    # Format output - Keep @timestamp as actual timestamp type for Kibana recognition
     output_df = windowed_df.select(
-        date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_start"),
-        date_format(col("window.end"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_end"),
-        date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("@timestamp"),  # Kibana time field
+        col("window.start").alias("@timestamp"),  # Keep as TIMESTAMP for Kibana time field
+        col("window.start").alias("window_start"),  # Also keep as timestamp type
+        col("window.end").alias("window_end"),      # Also keep as timestamp type
         col("ticker"),
         col("company"),
         col("avg_price"),
@@ -126,7 +135,9 @@ def run_streaming():
         col("total_volume"),
         col("trade_count"),
         col("price_volatility"),
-        date_format(current_timestamp(), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("processed_time")
+        col("source_time"),
+        current_timestamp().alias("processed_time"),  # Keep as timestamp type
+        concat_ws("_", col("ticker"), date_format(col("window.start"), "yyyyMMddHHmm")).alias("doc_id"),
     )
     
     # Start streaming with retry to avoid cold-start races (topic not created yet)
@@ -141,7 +152,8 @@ def run_streaming():
                 .format("org.elasticsearch.spark.sql") \
                 .option("es.nodes", ES_NODES) \
                 .option("es.port", ES_PORT) \
-                .option("es.resource", f"{ES_INDEX}/doc") \
+                .option("es.resource", f"{ES_INDEX}/_doc") \
+                .option("es.mapping.id", "doc_id") \
                 .option("checkpointLocation", CHECKPOINT_LOCATION) \
                 .trigger(processingTime=TRIGGER_INTERVAL) \
                 .start()

@@ -68,7 +68,6 @@ def get_spark_schema():
             StructField,
             StringType,
             DoubleType,
-            LongType,
         )
     except Exception as e:  # pragma: no cover
         raise RuntimeError(
@@ -86,7 +85,7 @@ def get_spark_schema():
             StructField(FIELD_LOW, DoubleType(), True),
             StructField(FIELD_CLOSE, DoubleType(), True),
             StructField(FIELD_ADJ_CLOSE, DoubleType(), True),
-            StructField(FIELD_VOLUME, LongType(), True),
+            StructField(FIELD_VOLUME, DoubleType(), True),
         ]
     )
 
