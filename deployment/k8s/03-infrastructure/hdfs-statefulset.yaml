@@ -33,15 +33,18 @@ spec:
           value: "file:///hadoop/dfs/name"
         - name: HDFS_CONF_dfs_permissions_enabled
           value: "false"
+        # FIX QUAN TRỌNG: Giới hạn Heap 512m + Fix DNS
+        - name: HADOOP_OPTS
+          value: "-Ddfs.namenode.datanode.registration.ip-hostname-check=false -Xmx512m -Xms512m"
         volumeMounts:
         - name: namenode-storage
           mountPath: /hadoop/dfs/name
         resources:
           requests:
-            memory: "1Gi"
-            cpu: "500m"
+            memory: "512Mi"
+            cpu: "100m"
           limits:
-            memory: "2Gi"
+            memory: "1Gi"  # Container 1GB > Java Heap 512MB (An toàn)
             cpu: "1000m"
         livenessProbe:
           httpGet:
@@ -53,14 +56,14 @@ spec:
           httpGet:
             path: /
             port: 9870
-          initialDelaySeconds: 30
+          initialDelaySeconds: 60
           periodSeconds: 10
       volumes:
       - name: namenode-storage
         persistentVolumeClaim:
           claimName: hdfs-namenode-pvc
 ---
-# Service cho HDFS NameNode
+# Service HDFS NameNode
 apiVersion: v1
 kind: Service
 metadata:
@@ -108,16 +111,19 @@ spec:
           value: "file:///hadoop/dfs/data"
         - name: SERVICE_PRECONDITION
           value: "hadoop-namenode:9870"
+        # FIX QUAN TRỌNG: Giới hạn Heap 512m + Fix DNS
+        - name: HADOOP_OPTS
+          value: "-Ddfs.namenode.datanode.registration.ip-hostname-check=false -Xmx512m -Xms512m"
         volumeMounts:
         - name: datanode-storage
           mountPath: /hadoop/dfs/data
         resources:
           requests:
-            memory: "2Gi"
-            cpu: "500m"
+            memory: "512Mi"
+            cpu: "100m"
           limits:
-            memory: "4Gi"
-            cpu: "2000m"
+            memory: "1.5Gi" # Container 1.5GB > Java Heap 512MB (Rất an toàn)
+            cpu: "1000m"
         livenessProbe:
           httpGet:
             path: /
@@ -128,14 +134,14 @@ spec:
           httpGet:
             path: /
             port: 9864
-          initialDelaySeconds: 30
+          initialDelaySeconds: 60
           periodSeconds: 10
       volumes:
       - name: datanode-storage
         persistentVolumeClaim:
           claimName: hdfs-datanode-pvc
 ---
-# Service cho HDFS DataNode
+# Service HDFS DataNode
 apiVersion: v1
 kind: Service
 metadata:

@@ -35,7 +35,7 @@ spec:
         env:
           # WebHDFS endpoint (HTTP)
           - name: HDFS_HOST
-            value: hdfs-namenode
+            value: hadoop-namenode
           - name: HDFS_PORT
             value: "9870"
           - name: HDFS_BASE_PATH

@@ -12,15 +12,16 @@
 2. [Prerequisites](#-prerequisites)
 3. [Connect to GKE Cluster](#-connect-to-gke-cluster)
 4. [Understand K8s Structure](#-understand-k8s-structure)
-5. [Build & Push Docker Images](#-build--push-docker-images)
-6. [Deploy Infrastructure Services](#-deploy-infrastructure-services)
-7. [Deploy Application Services](#-deploy-application-services)
-8. [Verify Deployment](#-verify-deployment)
-9. [Feed Data](#-feed-data)
-10. [Access Services](#-access-services)
-11. [Scaling & Optimization](#-scaling--optimization)
-12. [Troubleshooting](#-troubleshooting)
-13. [Complete Teardown](#-complete-teardown)
+5. [🚀 Automatic Deployment (RECOMMENDED)](#-automatic-deployment-recommended)
+6. [Build & Push Docker Images](#-build--push-docker-images)
+7. [Deploy Infrastructure Services](#-deploy-infrastructure-services)
+8. [Deploy Application Services](#-deploy-application-services)
+9. [Verify Deployment](#-verify-deployment)
+10. [Feed Data](#-feed-data)
+11. [🌐 Access Services & Dashboards](#-access-services)
+12. [Scaling & Optimization](#-scaling--optimization)
+13. [Troubleshooting](#-troubleshooting)
+14. [Complete Teardown](#-complete-teardown)
 
 ---
 
@@ -1239,52 +1240,383 @@ pkill -f "port-forward.*elasticsearch"
 
 ---
 
+## 🚀 AUTOMATIC DEPLOYMENT (RECOMMENDED)
+
+Thay vì deploy thủ công từng bước, bạn có thể sử dụng scripts tự động trong thư mục `deployment/scripts/`.
+
+### Option 1: Triển khai tự động với deploy_all.sh
+
+Script này sẽ tự động deploy toàn bộ hệ thống theo đúng thứ tự và chờ healthcheck:
+
+```bash
+cd /home/danz/Downloads/big_data/deployment/scripts
+
+# Cấp quyền thực thi (chỉ cần 1 lần)
+chmod +x *.sh
+
+# Deploy với node thông thường
+NAMESPACE=bigdata ./deploy_all.sh
+
+# HOẶC: Deploy với node nhỏ (e2-medium) - giảm resource requirements
+NAMESPACE=bigdata SMALL_NODES=1 ./deploy_all.sh
+```
+
+**Script tự động thực hiện:**
+
+- ✅ Tạo namespace và configmap
+- ✅ Tạo PVCs (Persistent Volume Claims)
+- ✅ Deploy Zookeeper → Kafka → HDFS → Elasticsearch (theo thứ tự)
+- ✅ Tự động format HDFS nếu chưa có
+- ✅ Fix quyền Elasticsearch nếu gặp lỗi
+- ✅ Tạo Kafka topics tự động
+- ✅ Deploy các ứng dụng (Producer, Spark Streaming, Kibana)
+- ✅ Deploy CronJobs
+- ✅ Chờ healthcheck cho từng service
+
+**Ưu điểm:**
+
+- 🎯 Đảm bảo đúng thứ tự triển khai
+- ⏱️ Tự động chờ service ready trước khi deploy tiếp
+- 🔧 Tự động xử lý các lỗi phổ biến
+- 💻 Hỗ trợ node nhỏ với `SMALL_NODES=1`
+
+**📸 Screenshot 27a**: Automatic deployment completed
+
+---
+
+### Option 2: Build và Push Images tự động
+
+Thay vì build thủ công, sử dụng script:
+
+```bash
+cd /home/danz/Downloads/big_data/deployment/scripts
+
+# Build và push với tag mặc định (v1.0.0)
+./build-and-push.sh
+
+# HOẶC: Build với custom tag
+./build-and-push.sh v2.0.0
+```
+
+**Script tự động thực hiện:**
+
+- ✅ Lấy PROJECT_ID từ gcloud config
+- ✅ Build 2 images (bigdata-app & bigdata-spark)
+- ✅ Test images trước khi push
+- ✅ Tag cả version và latest
+- ✅ Configure Docker với gcloud
+- ✅ Push lên GCR
+- ✅ Verify images trong GCR
+
+**📸 Screenshot 27b**: Images built and pushed
+
+---
+
+### Option 3: Tạo GKE Cluster tự động
+
+Nếu chưa có cluster, tạo tự động:
+
+```bash
+cd /home/danz/Downloads/big_data/deployment/scripts
+
+# Standard cluster (production)
+./create-cluster.sh bigdata-cluster asia-southeast1 standard
+
+# Preemptible cluster (tiết kiệm 60-70%, training/dev)
+./create-cluster.sh bigdata-cluster asia-southeast1 preemptible
+
+# Autopilot cluster (serverless, pay-per-use)
+./create-cluster.sh bigdata-cluster asia-southeast1 autopilot
+```
+
+**📸 Screenshot 27c**: Cluster created
+
+---
+
+### Option 4: Cleanup toàn bộ hệ thống
+
+Xóa sạch tất cả resources:
+
+```bash
+cd /home/danz/Downloads/big_data/deployment/scripts
+
+# Script sẽ yêu cầu xác nhận
+NAMESPACE=bigdata ./cleanup_all.sh
+# Type 'yes' to confirm
+```
+
+**Script tự động xóa:**
+
+- ✅ Tất cả pods, deployments, statefulsets
+- ✅ PVCs và PVs
+- ✅ ConfigMaps và Secrets
+- ✅ CronJobs và Jobs
+- ✅ Services và Ingress
+- ✅ Namespace
+
+**⚠️ Cảnh báo**: Hành động này KHÔNG THỂ HOÀN TÁC!
+
+---
+
+### Workflow đề xuất
+
+```bash
+# 1. Tạo cluster (nếu chưa có)
+./create-cluster.sh bigdata-cluster asia-southeast1 preemptible
+
+# 2. Connect cluster
+gcloud container clusters get-credentials bigdata-cluster --zone=asia-southeast1-a
+
+# 3. Build và push images
+./build-and-push.sh v1.0.0
+
+# 4. Update PROJECT_ID trong YAML files
+PROJECT_ID=$(gcloud config get-value project)
+find ../k8s -name "*.yaml" -type f -exec sed -i "s|gcr.io/inner-period-480016-h8|gcr.io/${PROJECT_ID}|g" {} +
+
+# 5. Deploy toàn bộ hệ thống
+NAMESPACE=bigdata SMALL_NODES=1 ./deploy_all.sh
+
+# 6. Kiểm tra
+kubectl get all -n bigdata
+```
+
+---
+
 ## 🌐 ACCESS SERVICES
 
-### Step 28: Port-Forward Kibana
+### Step 28: Port-Forward Kibana (Visualization Dashboard)
 
 ```bash
 # Forward Kibana to localhost
 # If 5601 is busy, use 5602:5601
 kubectl port-forward svc/kibana 5601:5601 -n $NAMESPACE
 
-# Access: http://localhost:5601
+# Access in browser: http://localhost:5601
 ```
 
-**In Kibana UI:**
+**Configure Kibana Dashboard:**
 
-1. Go to **Management** → **Stack Management** → **Index Patterns**
-2. Create index pattern: **stock-realtime-1m\***
-   - Time field: **window_start**
-3. Create index pattern: **stock-alerts-1m\***
-   - Time field: **window_start**
-4. Create index pattern: **batch-features\***
-   - Time field: **month**
-5. Go to **Discover** to view data
+1. Open http://localhost:5601 in browser
+2. Go to **☰ Menu** → **Management** → **Stack Management** → **Index Patterns**
+3. **Create index patterns** (click "Create index pattern" button):
 
-**📸 Screenshot 29**: Kibana accessible
+   **a) Real-time Stock Data:**
+
+   - Index pattern: `stock-realtime-1m*`
+   - Time field: `window_start`
+   - Click "Create index pattern"
+
+   **b) Stock Alerts:**
+
+   - Index pattern: `stock-alerts-1m*`
+   - Time field: `window_start`
+   - Click "Create index pattern"
+
+   **c) Batch Features:**
+
+   - Index pattern: `batch-features*`
+   - Time field: `month`
+   - Click "Create index pattern"
+
+4. Go to **☰ Menu** → **Analytics** → **Discover** to view real-time data
+5. Select index pattern from dropdown
+6. Set time range (Last 15 minutes, Last 1 hour, etc.)
+
+**Available Visualizations:**
+
+- 📊 **Stock Price Trends**: Line charts showing price movements
+- 📈 **Volume Analysis**: Bar charts of trading volumes
+- 🚨 **Alerts Dashboard**: Price spike/drop alerts
+- 📉 **Batch Features**: Monthly statistics and features
+
+**📸 Screenshot 29**: Kibana dashboard with data
 
 ---
 
-### Step 29: Other Services (Optional)
+### Step 29: Access Elasticsearch (Search & Analytics Engine)
 
 ```bash
 # Port-forward Elasticsearch
 # If 9200 is busy, use 9201:9200
 kubectl port-forward svc/elasticsearch 9200:9200 -n $NAMESPACE &
 
+# Test connection
+curl http://localhost:9200
+
+# Check cluster health
+curl http://localhost:9200/_cluster/health?pretty
+
+# List all indices
+curl http://localhost:9200/_cat/indices?v
+
+# Query real-time data
+curl http://localhost:9200/stock-realtime-1m/_search?pretty
+
+# Count documents
+curl http://localhost:9200/stock-realtime-1m/_count
+```
+
+**Expected Output:**
+
+```json
+{
+  "name": "elasticsearch-0",
+  "cluster_name": "bigdata-cluster",
+  "version": {
+    "number": "7.17.16"
+  }
+}
+```
+
+**Access in Browser:**
+
+- Main: http://localhost:9200
+- Cluster Info: http://localhost:9200/\_cluster/health?pretty
+- Indices: http://localhost:9200/\_cat/indices?v
+
+**📸 Screenshot 30**: Elasticsearch accessible
+
+---
+
+### Step 30: Access HDFS NameNode UI (Distributed Storage)
+
+```bash
 # Port-forward HDFS NameNode UI
 # If 9870 is busy, use 9871:9870
 kubectl port-forward svc/hadoop-namenode 9870:9870 -n $NAMESPACE &
 
-# List port-forwards
-ps aux | grep "kubectl port-forward"
+# Access in browser: http://localhost:9870
 ```
 
-**Access URLs:**
+**HDFS Web Interface Features:**
 
-- Elasticsearch: http://localhost:9200
-- HDFS NameNode: http://localhost:9870
+- 📁 **Browse File System**: View stored stock data
+- 💾 **Storage Capacity**: Check disk usage
+- 🖥️ **DataNode Status**: Monitor storage nodes
+- 📊 **Metrics**: Block count, file count
+
+**Common paths to check:**
+
+- `/stock-data/` - Archived stock data from Kafka
+- `/tmp/serving/batch_features/` - Batch processing output
+
+**CLI Commands:**
+
+```bash
+# List HDFS directories
+kubectl exec -it hadoop-namenode-0 -n $NAMESPACE -- hdfs dfs -ls /
+
+# Check HDFS storage report
+kubectl exec -it hadoop-namenode-0 -n $NAMESPACE -- hdfs dfsadmin -report
+
+# View stock data files
+kubectl exec -it hadoop-namenode-0 -n $NAMESPACE -- hdfs dfs -ls /stock-data/
+```
+
+**📸 Screenshot 31**: HDFS NameNode UI
+
+---
+
+### Step 31: Access Kafka (Message Queue)
+
+```bash
+# Port-forward Kafka (optional, mainly for debugging)
+kubectl port-forward svc/kafka 9092:9092 -n $NAMESPACE &
+
+# List topics from inside pod
+kubectl exec -it kafka-0 -n $NAMESPACE -- kafka-topics --list --bootstrap-server localhost:9092
+
+# Check topic details
+kubectl exec -it kafka-0 -n $NAMESPACE -- kafka-topics --describe --topic stocks-realtime --bootstrap-server localhost:9092
+
+# Consume messages (see live data)
+kubectl exec -it kafka-0 -n $NAMESPACE -- kafka-console-consumer --bootstrap-server localhost:9092 --topic stocks-realtime --from-beginning --max-messages 10
+```
+
+**Expected Topics:**
+
+- `stocks-realtime` - Raw data from Yahoo Finance
+- `stocks-realtime-spark` - Processed data to Spark
+
+**📸 Screenshot 32**: Kafka topics and messages
+
+---
+
+### Step 32: Monitor Spark Streaming Jobs
+
+```bash
+# Check Spark Streaming Consumer logs
+kubectl logs -f deployment/spark-streaming-consumer -n $NAMESPACE
+
+# Check Spark Alerts logs
+kubectl logs -f deployment/spark-streaming-alerts -n $NAMESPACE
+
+# Check batch job history
+kubectl get jobs -n $NAMESPACE
+kubectl get cronjobs -n $NAMESPACE
+```
+
+**Look for:**
+
+- ✅ "Batch processing completed"
+- ✅ "Writing to Elasticsearch"
+- ✅ Window aggregations
+- ❌ Connection errors
+- ❌ Out of memory errors
+
+**📸 Screenshot 33**: Spark jobs running
+
+---
+
+### All Service Access Summary
+
+| Service           | Port Forward Command                                            | Access URL            | Purpose                    |
+| ----------------- | --------------------------------------------------------------- | --------------------- | -------------------------- |
+| **Kibana**        | `kubectl port-forward svc/kibana 5601:5601 -n bigdata`          | http://localhost:5601 | 📊 Visualization Dashboard |
+| **Elasticsearch** | `kubectl port-forward svc/elasticsearch 9200:9200 -n bigdata`   | http://localhost:9200 | 🔍 Search & Analytics      |
+| **HDFS NameNode** | `kubectl port-forward svc/hadoop-namenode 9870:9870 -n bigdata` | http://localhost:9870 | 💾 Storage Management      |
+| **Kafka**         | `kubectl port-forward svc/kafka 9092:9092 -n bigdata`           | localhost:9092        | 📨 Message Queue           |
+| **Zookeeper**     | `kubectl port-forward svc/zookeeper 2181:2181 -n bigdata`       | localhost:2181        | ⚙️ Coordination Service    |
+
+**💡 Tip**: Chạy tất cả port-forwards trong background:
+
+```bash
+# Start all port-forwards
+kubectl port-forward svc/kibana 5601:5601 -n bigdata &
+kubectl port-forward svc/elasticsearch 9200:9200 -n bigdata &
+kubectl port-forward svc/hadoop-namenode 9870:9870 -n bigdata &
+
+# List all port-forwards
+ps aux | grep "kubectl port-forward"
+
+# Kill all port-forwards when done
+pkill -f "kubectl port-forward"
+```
+
+---
+
+### Quick Verification Commands
+
+```bash
+# Check all pods status
+kubectl get pods -n bigdata
+
+# Check all services
+kubectl get svc -n bigdata
+
+# Check persistent volumes
+kubectl get pvc -n bigdata
+
+# Check cronjobs schedule
+kubectl get cronjobs -n bigdata
+
+# View producer logs (data crawling)
+kubectl logs -f deployment/kafka-producer-crawl -n bigdata --tail=50
+
+# View streaming logs (real-time processing)
+kubectl logs -f deployment/spark-streaming-consumer -n bigdata --tail=50
+```
 
 ---
 

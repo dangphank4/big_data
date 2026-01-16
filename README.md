@@ -1,6 +1,6 @@
 # BÁO CÁO KỸ THUẬT – HỆ THỐNG BIG DATA PHÂN TÍCH CHỨNG KHOÁN
 
-## 1. Kiến trúc hệ thống (giải thích dễ hiểu)
+## 1. Kiến trúc hệ thống
 
 ### 1.1. Luồng dữ liệu tổng quát
 

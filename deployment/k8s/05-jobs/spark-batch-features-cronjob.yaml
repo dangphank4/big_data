@@ -37,9 +37,9 @@ spec:
             - /app/src/batch_jobs/run_all.py
             env:
             - name: HDFS_INPUT_PATH
-              value: "hdfs://hdfs-namenode:9000/stock-data"
+              value: "hdfs://hadoop-namenode:9000/stock-data"
             - name: HDFS_OUTPUT_PATH
-              value: "hdfs://hdfs-namenode:9000/tmp/serving/batch_features"
+              value: "hdfs://hadoop-namenode:9000/tmp/serving/batch_features"
             - name: ES_NODES
               value: "elasticsearch"
             - name: ES_PORT
@@ -48,10 +48,10 @@ spec:
               value: "batch-features"
             resources:
               requests:
-                memory: "2Gi"
-                cpu: "1000m"
+                memory: "512Mi"
+                cpu: "100m"
               limits:
-                memory: "4Gi"
-                cpu: "2000m"
+                memory: "1Gi"
+                cpu: "500m"
           restartPolicy: OnFailure
 
