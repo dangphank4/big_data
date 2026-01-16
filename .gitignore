@@ -4,5 +4,3 @@ output/
 *.log
 .vscode
 google-cloud-sdk/
-docs/
-README.md
