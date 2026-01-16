@@ -33,6 +33,8 @@ spec:
           value: "file:///hadoop/dfs/name"
         - name: HDFS_CONF_dfs_permissions_enabled
           value: "false"
+        - name: HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check
+          value: "false"
         # FIX QUAN TRỌNG: Giới hạn Heap 512m + Fix DNS
         - name: HADOOP_OPTS
           value: "-Ddfs.namenode.datanode.registration.ip-hostname-check=false -Xmx512m -Xms512m"
@@ -148,7 +150,7 @@ metadata:
   name: hadoop-datanode
   namespace: bigdata
 spec:
-  type: ClusterIP
+  clusterIP: None # Headless Service để client có thể sử dụng DNS, khong thi se bi loi khong biet dia chi DataNode
   selector:
     app: hadoop-datanode
   ports:

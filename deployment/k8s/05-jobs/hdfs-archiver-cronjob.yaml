@@ -44,9 +44,9 @@ spec:
               value: "24"  # Archive last 24 hours
             resources:
               requests:
-                memory: "1Gi"
-                cpu: "500m"
+                memory: "256Mi"  # Chỉ cần 256MB để khởi động
+                cpu: "100m"      # Chỉ cần 0.1 CPU
               limits:
-                memory: "2Gi"
-                cpu: "1000m"
+                memory: "512Mi"
+                cpu: "500m"
           restartPolicy: OnFailure
